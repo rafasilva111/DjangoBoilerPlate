@@ -76,7 +76,6 @@ from apps.user_app.models import User, Invitation
 #   Forms
 #
 from apps.user_app.forms import LoginForm, RegisterForm, ResetForm, SetPasswordForm,UserInviteForm,UserRegisterByInviteForm,UserEditForm
-from apps.task_app.forms import TaskForm, JobForm,MaxRecordsConditionForm,TimeConditionForm
 
 ##
 #   Filters
@@ -337,7 +336,7 @@ class UserDetailView(PermissionRequiredMixin, TemplateView):
         
         return context
     
-class UserEditView(PermissionRequiredMixin,TemplateView):
+class UserEditView(PermissionRequiredMixin,TemplateView): # todo
     template_name = 'user_app/user/edit.html'
     permission_required = 'auth.change_user'
     form_class = UserEditForm
@@ -356,74 +355,19 @@ class UserEditView(PermissionRequiredMixin,TemplateView):
 
     def post(self, request, *args, **kwargs):
         job_form = UserEditForm(request.POST)
-        starting_time_condition_form = TimeConditionForm(request.POST, prefix='starting_condition_time_form')
-        stopping_time_condition_form = TimeConditionForm(request.POST, prefix='stopping_condition_time_form')
-        stopping_condition_max_records_form = MaxRecordsConditionForm(request.POST, prefix='stopping_condition_max_records_form')
+
 
         if job_form.is_valid() :
             starting_condition_form = None
             stopping_condition_form = None
             
             
-            # Save the starting condition
-            
-            if job_form.instance.starting_condition_type and job_form.instance.starting_condition_type.name =='time condition': 
-                if starting_time_condition_form.is_valid():
-                
-                    starting_condition_form = starting_time_condition_form
-                else:
-                    # Collect all errors if any form is invalid
-                    context = self.get_context_data()
-                    context['form'] = job_form
-                    context['starting_condition_time_form'] = starting_time_condition_form
-                    context['stopping_condition_time_form'] = stopping_time_condition_form
-                    context['stopping_condition_max_records_form'] = stopping_condition_max_records_form
-                    
-                    return self.render_to_response(context)
-                
-            # Save the stopping time condition
-            
-            if job_form.instance.stopping_condition_type: 
-                
-                if job_form.instance.stopping_condition_type.name =='time condition':
-                    if stopping_time_condition_form.is_valid():
-                        stopping_condition_form = stopping_time_condition_form
-                    else:
-                        # Collect all errors if any form is invalid
-                        context = self.get_context_data()
-                        context['form'] = job_form
-                        context['starting_condition_time_form'] = starting_time_condition_form
-                        context['stopping_condition_time_form'] = stopping_time_condition_form
-                        context['stopping_condition_max_records_form'] = stopping_condition_max_records_form
-                        
-                        return self.render_to_response(context)
-                
-                elif job_form.instance.stopping_condition_type.name =='max records condition':
-                    stopping_condition_form = MaxRecordsConditionForm(request.POST, prefix='stopping_condition_max_records_form')
-                    
-                    if stopping_condition_max_records_form.is_valid():
-                        stopping_condition_form = stopping_condition_max_records_form
-                    # Collect all errors if any form is invalid
-                    else:
-                        context = self.get_context_data()
-                        context['form'] = job_form
-                        context['starting_condition_time_form'] = starting_time_condition_form
-                        context['stopping_condition_time_form'] = stopping_time_condition_form
-                        context['stopping_condition_max_records_form'] = stopping_condition_max_records_form
-                        
-                        return self.render_to_response(context)
 
-                
-            job = job_form.save(starting_condition_form,stopping_condition_form)
             
-            return redirect(reverse('job_detail', args=[job.id]))
 
         # Collect all errors if any form is invalid
         context = self.get_context_data()
         context['form'] = job_form
-        context['starting_condition_time_form'] = starting_time_condition_form
-        context['stopping_condition_time_form'] = stopping_time_condition_form
-        context['stopping_condition_max_records_form'] = stopping_condition_max_records_form
 
         return self.render_to_response(context)
 

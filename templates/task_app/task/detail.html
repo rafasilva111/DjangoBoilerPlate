@@ -32,15 +32,31 @@
             <div class="container-fluid d-flex align-items-center justify-content-between">
                 <h4 class="card-header">Task Details</h4>
                 <div>
-                    <a href="{% url 'task_cancel' task.id%}" class="btn btn-primary py-1">
+                    {% if can_cancel_task %}
+                    <a href="{% url 'task_cancel' task.id %}" class="btn btn-warning py-1">
                         Cancel
                     </a>
-                    <a href="{% url 'task_restart' task.id%}" class="btn btn-primary py-1">
+                    {% endif %}
+                    {% if can_restart_task %}
+                    <a href="{% url 'task_restart' task.id %}" class="btn btn-info py-1">
                         Restart
                     </a>
+                    {% endif %}
+                    {% if can_pause_task %}
+                    <a href="{% url 'task_pause' task.id %}" class="btn btn-secondary py-1">
+                        Pause
+                    </a>
+                    {% endif %}
+                    {% if can_resume_task %}
+                    <a href="{% url 'task_resume' task.id %}" class="btn btn-success py-1">
+                        Resume
+                    </a>
+                    {% endif %}
+                    {% if can_delete_task %}
                     <a href="{% url 'task_delete' task.id %}" class="btn btn-danger py-1">
                         Delete
                     </a>
+                    {% endif %}
                 </div>
             </div>
             <div class="card-body task-details">
@@ -51,7 +67,7 @@
                     </div>
                     <div class="col-md-2">
                         <h6>Status:</h6>
-                        <span class="
+                        <span id="status" class="
                         badge 
                         {% if task.status == 'STARTING' %}
                             bg-label-primary
@@ -76,14 +92,14 @@
                     </div>
                     <div class="col-md-3">
                         <h6>Finished At:</h6>
-                        <p class="badge bg-label-primary me-1">{{ task.finished_at }}</p>
+                        <p id="finished-at" class="badge bg-label-primary me-1">{{ task.finished_at }}</p>
                     </div>
                 </div>
             </div>
         </div>
     </div>
     <!--/ Vertical Scrollbar -->
-    
+
     <!-- Vertical & Horizontal Scrollbars -->
     <div class="col-12">
         <div class="card overflow-hidden" style="height: 500px;">
@@ -99,26 +115,54 @@
 </div>
 
 <script>
+    // Get elements
     const logContainer = document.getElementById('log-container');
     const cardBody = document.getElementById('both-scrollbars-example');
+    const finishedAtElement = document.getElementById('finished-at');
+    const statusElement = document.getElementById('status');
 
+    // Initialize WebSocket
     const socket = new WebSocket("ws://{{ WEBSOCKET_HOST }}/ws/task/{{ task.id }}/");
-    
-    socket.onmessage = function(event) {
-        data = JSON.parse(event.data);
-        if (data["type"] == 'log_line') {
-            const newLog = document.createTextNode(data["line"]);
+
+    // Handle incoming messages
+    socket.onmessage = function (event) {
+        const data = JSON.parse(event.data);
+
+        // Handle log line updates
+        if (data.type === 'log_line') {
+            const newLog = document.createTextNode(data.line);
             logContainer.appendChild(newLog);
             cardBody.scrollTop = cardBody.scrollHeight;
         }
-        else{
-            console.log(event.data);
-        }
-        
-        
-        
 
-        
+        // Handle task updates
+        else if (data.type === 'task_update') {
+            finishedAtElement.textContent = data.data.finished_at;
+            statusElement.textContent = data.data.status;
+            statusElement.className = 'badge me-1';
+
+            // Update status badge class
+            switch (data.data.status) {
+                case 'STARTING':
+                    statusElement.classList.add('bg-label-primary');
+                    break;
+                case 'RUNNING':
+                    statusElement.classList.add('bg-label-info');
+                    break;
+                case 'CANCELED':
+                    statusElement.classList.add('bg-label-warning');
+                    break;
+                case 'FAILED':
+                    statusElement.classList.add('bg-label-danger');
+                    break;
+                case 'FINISHED':
+                    statusElement.classList.add('bg-label-success');
+                    break;
+                default:
+                    statusElement.classList.add('bg-label-secondary');
+                    break;
+            }
+        }
     };
 </script>
 {% endblock %}

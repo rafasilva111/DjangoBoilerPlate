@@ -91,7 +91,7 @@ def _init_job(job_id):
 ##
 
 @app.task
-def _launch_task(task_id):
+def _launch_task(task_id, continue_mode=True):
     """
     Launches a specific task, running a test task based on the task type.
 
@@ -111,28 +111,32 @@ def _launch_task(task_id):
     task.save()
 
     # Determine task behavior based on task type
-    if task.type == Task.TaskType.SMALL:
-        logger.info('Starting small Task')
-        test_task(logger, task, max_count=5)
-    elif task.type == Task.TaskType.MEDIUM:
-        logger.info('Starting medium Task')
-        test_task(logger, task, max_count=1000)
-    elif task.type == Task.TaskType.LARGE:
-        logger.info('Starting large Task')
-        test_task(logger, task, max_count=10000)
-    elif task.type == Task.TaskType.EMPTY:
-        logger.info('Starting empty Task')
-        test_task(logger, task, max_count=1)
-    elif task.type == Task.TaskType.FAILURE:
-        logger.info('Starting failure Task')
-        test_task(logger, task, max_count=-1)
+    match task.type:
+        case Task.TaskType.SMALL:
+            max_count = 5
+        case Task.TaskType.MEDIUM:
+            max_count = 1000
+        case Task.TaskType.LARGE:
+            max_count = 10000
+        case Task.TaskType.EMPTY:
+            max_count = 1
+        case Task.TaskType.FAILURE:
+            max_count = -1
+            
+    logger.info("")
+    if continue_mode:
+        logger.info(f'Resuming {task.type} Task')   
+    else:
+        logger.info(f'Starting {task.type} Task')
+    
+    test_task(logger, task, max_count, continue_mode)
 
 
 ###
 # Helper Functions
 ##
 
-def test_task(logger, task, max_count=10000):
+def test_task(logger, task, max_count=10000, continue_mode=True):
     """
     A helper function to simulate task processing by counting to a max value.
 
@@ -147,21 +151,30 @@ def test_task(logger, task, max_count=10000):
     Raises:
         Exception: If max_count is less than 0.
     """
+    logger.info("")
     logger.info("Executing Task...")
+    logger.info("")
     
     if max_count < 0:
         raise Exception("Max Count cannot be less than 0")
 
-    counter = 1
+    counter = task.step + 1 if continue_mode else 1
+
     while counter <= max_count:
         logger.info(f"Counting at: {counter}")
         time.sleep(1)
         counter += 1
+        
+        # Save state We need to do this to avoid losing the counter value in case of failure or pause
+        task.step = counter
+        task.save() 
 
     # Update task status to finished
     task.finished_at = timezone.now()
     task.status = task.Status.FINISHED
     task.save()
     
+    logger.info("")
     logger.info("Done...")
-    print("Done")
+    logger.info("")
+

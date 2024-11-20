@@ -85,18 +85,6 @@ class TimeCondition(Condition):
         return f"{self.id} - Crontab: {self.crontab}"
 
 
-class MaxRecordsCondition(Condition):
-    """
-    Condition based on a maximum number of records.
-
-    Attributes:
-        max_records (int): Maximum number of records to trigger this condition.
-    """
-    max_records = models.IntegerField(null=True)
-
-    def __str__(self):
-        return f"{self.id} - Max Records: {self.max_records}"
-
 
 class Job(BaseTask):
     """
@@ -129,7 +117,7 @@ class Job(BaseTask):
     stopping_condition_id = models.PositiveIntegerField(null=True)
     stopping_condition = GenericForeignKey('stopping_condition_type', 'stopping_condition_id')
 
-    debug_mode = models.BooleanField(default=False) 
+    continue_mode = models.BooleanField(default=False)
     last_run = models.DateTimeField(null=True, blank=True)
         
     def delete(self, *args, **kwargs):
@@ -160,6 +148,9 @@ class Job(BaseTask):
             self.periodic_task.save()
 
 
+
+
+
 class Task(BaseTask):
     """
     Represents an individual task within a job, inheriting from `BaseTask`.
@@ -173,23 +164,21 @@ class Task(BaseTask):
         sql_file (str): SQL file path for the task.
         celery_task_id (str): Celery task ID.
         job (ForeignKey): The job associated with this task.
-        stopping_condition_max_records (int): Max records for stopping condition.
         debug_mode (bool): Whether the task is in debug mode.
         status (str): Status of the task, e.g., STARTING, RUNNING, CANCELED.
     """
     started_at = models.DateTimeField(auto_now=True)
-    paused_at = models.DateTimeField(null=True)
-    resumed_at = models.DateTimeField(null=True)
     finished_at = models.DateTimeField(null=True)
     log_path = models.CharField(max_length=255, null=True, blank=True)
     sql_file = models.CharField(max_length=255, null=True, blank=True)
-    celery_task_id = models.CharField(max_length=255, null=True, blank=True)
+    
     job = models.ForeignKey(Job, on_delete=models.CASCADE, blank=True, null=True, related_name='tasks')
-    stopping_condition_max_records = models.IntegerField(default=None, null=True, blank=True)
     debug_mode = models.BooleanField(default=False)
+    step = models.IntegerField(default=1)
     
     class Status(models.TextChoices):
         STARTING = 'STARTING', 'Starting'
+        PAUSED = 'PAUSED', 'Paused'
         RUNNING = 'RUNNING', 'Running'
         CANCELED = 'CANCELED', 'Canceled'
         FAILED = 'FAILED', 'Failed'
@@ -201,10 +190,25 @@ class Task(BaseTask):
         default=Status.STARTING,
     )
     
+    
+    class Meta:
+        permissions = [
+            ("can_view_task", "Can view task's details"),
+            ("can_view_tasks", "Can view tasks list"),
+            ("can_create_task", "Can create task"),
+            ("can_edit_task", "Can edit task"),
+            
+            ("can_restart_task", "Can restart task"),
+            ("can_pause_task", "Can pause task"),
+            ("can_resume_task", "Can resume task"),
+            ("can_cancel_task", "Can cancel task"),
+            ("can_delete_task", "Can delete task"),
+        ]
+    
     def __str__(self):
         return f"Task: {self.id} - {self.type}"
 
-    def launch(self):
+    def launch(self, continue_mode= False):
         """
         Launches the task by setting its status and initiating a Celery task.
         """
@@ -213,10 +217,13 @@ class Task(BaseTask):
         self.save()
         
         if self.debug_mode:
-            _launch_task(self.id)
+            _launch_task(self.id, continue_mode)
         else:
-            self.celery_task_id = _launch_task.delay(self.id).id
-            self.save()
+            celery_id = CeleryTask.objects.create(
+                task=self, 
+                celery_task_id=_launch_task.delay(self.id, continue_mode).id
+            )
+            celery_id.save()
             
         
         
@@ -230,18 +237,64 @@ class Task(BaseTask):
         """
         Restarts the task by resetting and relaunching it.
         """
+        if self.status == Task.Status.RUNNING:
+            self.kill_current_celery_task()
+        
+        # reset milestones
+        self.step = 1
         self.started_at = timezone.now()
+        self.finished_at = None
         self.save()
-        if self.status != Task.Status.CANCELED:
-            self.purge()
+        self.purge()
         self.launch()
                 
     def cancel(self):
         """
         Cancels the task by revoking the Celery task and updating the status.
         """
-        result = AsyncResult(self.celery_task_id, app=app)
-        result.revoke(terminate=True)
+        # stop celery task
+        self.kill_current_celery_task()
+        
         self.status = Task.Status.CANCELED
         self.finished_at = timezone.now()
         self.save()
+
+    
+    def pause(self):
+        if self.status == Task.Status.RUNNING:
+            # stop celery task
+            self.kill_current_celery_task()
+
+            
+            self.paused_at = timezone.now()
+            self.status = Task.Status.PAUSED
+            self.save()
+
+        
+    def resume(self):
+        
+        if self.status == Task.Status.PAUSED:
+
+            self.resumed_at = timezone.now()
+            self.save()
+            self.launch(continue_mode=True)
+    
+    def kill_current_celery_task(self):
+        """
+        Kills the task by revoking the Celery task
+        """
+        # stop celery task
+        result = AsyncResult(self.celery_tasks.last().celery_task_id, app=app)
+        result.revoke(terminate=True)
+    
+            
+class CeleryTask(models.Model):
+    """
+    Celery task ID model.
+    """
+    celery_task_id = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, blank=True, null=True, related_name='celery_tasks')
+    
+    def __str__(self):
+        return f"Celery Task ID: {self.celery_task_id}"

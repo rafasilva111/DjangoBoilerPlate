@@ -28,11 +28,6 @@ from apps.user_app.models import User
 
 
 class TaskFilter(FilterSet):
-    user = ModelChoiceFilter(
-        queryset=User.objects.filter(user_type=User.UserType.COMPANY).all(),
-        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
-        label='Company:'
-    )
     started_at = DateRangeFilter(field_name='started_at', label='Started At',widget=forms.Select(attrs={'class': 'form-select form-select-sm'}))
     finished_at = DateRangeFilter(field_name='finished_at', label='Finished At',widget=forms.Select(attrs={'class': 'form-select form-select-sm'}))
     type = ChoiceFilter( choices=Task.TaskType.choices,label='Type', widget=forms.Select(attrs={'class': 'form-select form-select-sm'}))
@@ -44,11 +39,6 @@ class TaskFilter(FilterSet):
 
 
 class JobFilter(FilterSet):
-    user = ModelChoiceFilter(
-        queryset=User.objects.filter(user_type=User.UserType.COMPANY).all(),
-        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
-        label='Company:'
-    )
     type = ChoiceFilter( choices=Task.TaskType.choices,label='Type', widget=forms.Select(attrs={'class': 'form-select form-select-sm'}))
 
     class Meta:

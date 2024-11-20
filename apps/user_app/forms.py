@@ -277,7 +277,7 @@ class UserEditForm(forms.ModelForm):
 
     class Meta:
         model = User
-        fields = ['name', 'email', 'birth_date', 'sex', 'user_type']
+        fields = [ 'email', 'birth_date', 'sex', 'user_type']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control'}),
             'email': forms.EmailInput(attrs={'class': 'form-control'}),
