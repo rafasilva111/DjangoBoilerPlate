@@ -3,6 +3,9 @@ from django.contrib.auth.models import Group, Permission
 from apps.user_app.models import User
 from apps.common.constants import TESTING_ACCOUNT_A, TESTING_ACCOUNT_B,  TESTING_ACCOUNT_C
 from apps.common.functions import lower_and_underescore
+
+
+
 class Command(BaseCommand):
     """
     Django management command to create user groups with specific permissions and
@@ -52,17 +55,29 @@ class Command(BaseCommand):
         """
         # Define groups and their permissions
         groups_permissions = {
-            "Normal": [
+            User.UserType.NORMAL: [
+                # User permissions
+                "can_view_user","can_view_users"
                 # Task permissions
-                "can_view_task","can_view_tasks"
+                "can_view_task","can_view_tasks",
+                # Job permissions
+                "can_view_job","can_view_jobs"
             ],
-            "Staff": [
+            User.UserType.STAFF: [
+                # User permissions
+                "can_view_user","can_view_users","can_invite_user","can_edit_user","can_delete_user","can_disable_user",
                 # Task permissions
-                "can_view_task","can_view_tasks","can_restart_task", "can_cancel_task", "can_pause_task", "can_resume_task"   
+                "can_view_task","can_view_tasks","can_restart_task", "can_cancel_task", "can_pause_task", "can_resume_task",
+                # Job permissions
+                "can_view_job","can_view_jobs", "can_pause_job", "can_resume_job" 
             ],
-            "SuperUser": [
+            User.UserType.SUPERUSER: [
+                # User permissions
+                "can_view_user","can_view_users","can_invite_user","can_edit_user","can_delete_user","can_disable_user",
                 # Task permissions
-                "can_view_task","can_view_tasks","can_restart_task", "can_cancel_task", "can_create_task","can_edit_task","can_delete_task", "can_pause_task", "can_resume_task"
+                "can_view_task","can_view_tasks","can_restart_task", "can_cancel_task", "can_create_task","can_edit_task","can_delete_task", "can_pause_task", "can_resume_task",
+                # Job permissions
+                "can_view_job","can_view_jobs", "can_create_job","can_edit_job","can_delete_job", "can_pause_job", "can_resume_job"
             ]
         }
 
@@ -73,9 +88,9 @@ class Command(BaseCommand):
         name_c = lower_and_underescore(TESTING_ACCOUNT_C)
         
         users_to_groups = {
-            "Normal": [f"{name_c}@{name_c}.pt"],
-            "Staff": [f"{name_b}@{name_b}.pt" ],
-            "SuperUser": [f"{name_a}@{name_a}.pt"]
+            User.UserType.NORMAL: [f"{name_c}@{name_c}.pt"],
+            User.UserType.STAFF: [f"{name_b}@{name_b}.pt" ],
+            User.UserType.SUPERUSER: [f"{name_a}@{name_a}.pt"]
         }
 
         # Step 1: Create groups and assign permissions
@@ -102,7 +117,8 @@ class Command(BaseCommand):
                     for email in emails:
                         try:
                             user = User.objects.get(email=email)
-                            
+                            user.user_type = group_name
+                            user.save()
                             user.groups.add(group)
                             self.stdout.write(f"Added user '{email}' to group '{group_name}'")
                         except User.DoesNotExist:

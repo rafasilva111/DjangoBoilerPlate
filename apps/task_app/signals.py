@@ -93,12 +93,13 @@ from channels.layers import get_channel_layer
 # Celery task success signal handler
 @task_success.connect
 def task_success_handler(sender, result, **kwargs):
-    # Extract task id (if needed, you can use sender or kwargs to access more details)
-    celery_task_id = sender.request.id  # Or extract it in another way if needed
-    # You can also get the task result if necessary: result
     
-    task = CeleryTask.objects.get(celery_task_id=celery_task_id).task
-    # You can also use additional information such as task result if needed
+    #celery_task_id = sender.request.id  
+
+    try:
+        task = CeleryTask.objects.get(celery_task_id=sender.request.id).task
+    except CeleryTask.DoesNotExist: # This might happen when Job is triggered
+        return
 
     # Send the message to the appropriate WebSocket group (task-specific group)
     channel_layer = get_channel_layer()

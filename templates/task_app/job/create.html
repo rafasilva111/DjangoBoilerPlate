@@ -219,7 +219,22 @@
               </div>
             </div>
           </div>
-          
+
+          <!-- Continue field -->
+          {{ form.continue_mode.label }}
+          <p class="text-muted">If the job is stopped, should it continue from where it left off?</p>
+          <div class="col-md-12 mb-4">
+            
+            {{ form.continue_mode }}
+            {% if form.continue_mode.errors %}
+            <div class="invalid-feedback d-block">
+              {% for error in form.continue_mode.errors %}
+              {{ error }}
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+                    
 
           <button type="submit" class="btn btn-primary">
             Submit

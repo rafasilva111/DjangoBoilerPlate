@@ -26,7 +26,7 @@
 </h4>
 
 <div class="row">
-    <!-- Vertical Scrollbar -->
+    <!-- Task Detail Card -->
     <div class="col-md-12 col-sm-12">
         <div class="card overflow-hidden mb-4" style="height: auto;">
             <div class="container-fluid d-flex align-items-center justify-content-between">
@@ -93,6 +93,13 @@
                     <div class="col-md-3">
                         <h6>Finished At:</h6>
                         <p id="finished-at" class="badge bg-label-primary me-1">{{ task.finished_at }}</p>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-3">
+                        <h6>Log Path:</h6>
+                        <p class="badge bg-label-primary  me-1">{{ task.log_path }}</p>
                     </div>
                 </div>
             </div>

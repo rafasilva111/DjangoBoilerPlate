@@ -125,22 +125,13 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     objects = UserManager()
 
-    @property
-    def age(self):
-        today = timezone.now()
-        age = (
-            today.year
-            - self.birth_date.year
-            - ((today.month, today.day) < (self.birth_date.month, self.birth_date.day))
-        )
-        return age
-
     class UserType(models.TextChoices):
-        NORMAL = "N", "Normal"
-        ADMIN = "A", "Admin"
+        NORMAL = "Normal", "Normal"
+        STAFF = "Staff", "Staff"
+        SUPERUSER = "SuperUser", "Super User"
 
-    user_type = models.CharField(
-        max_length=1, choices=UserType.choices, default=UserType.NORMAL, null=False
+    type = models.CharField(
+        choices=UserType.choices, default=UserType.NORMAL, null=False
     )
 
     class SexType(models.TextChoices):
@@ -153,10 +144,12 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     class Meta:
         permissions = [
-            (f"can_view_user", f"Can view a User"),
-            (f"can_create_user", f"Can create a User"),
-            (f"can_edit_user", f"Can edit a User"),
-            (f"can_delete_user", f"Can delete a User"),
+            ("can_view_user", "Can view User's details"),
+            ("can_view_users", "Can view Users list"),
+            ("can_invite_user", "Can invite a User"),
+            ("can_edit_user", "Can edit a User"),
+            ("can_delete_user", "Can delete a User"),
+            ("can_disable_user", "Can disable a User"),
         ]
 
     USERNAME_FIELD = "email"

@@ -36,7 +36,7 @@ from datetime import date,datetime
 ##
 #   Models
 #
-from apps.user_app.models import User
+from apps.user_app.models import User,Group
 
 ##
 #   Contants
@@ -199,16 +199,6 @@ class UserRegisterByInviteForm(UserCreationForm):
         ))
        
     
-    birth_date = forms.DateField(
-        label="Birthdate:",
-        widget=forms.DateInput(
-            attrs={
-                "placeholder": "YYYY-MM-DD",
-                "class": "form-control",
-                "type": "date"  # This adds the date picker
-            }
-        ))
-    
     email = forms.CharField(
         label="Email:",
         widget=forms.EmailInput(
@@ -245,7 +235,7 @@ class UserRegisterByInviteForm(UserCreationForm):
     
     class Meta:
         model = User
-        fields = ['name', 'birth_date','password1', 'password2', 'email','sex']
+        fields = ['name','password1', 'password2', 'email','sex']
 
     def __init__(self, *args, **kwargs):
         email = kwargs.pop('email', None)
@@ -260,29 +250,19 @@ class UserRegisterByInviteForm(UserCreationForm):
             self.fields['company'].initial = company  # Pre-fill email
     
     
-    def clean_birth_date(self):
-        birth_date = self.cleaned_data['birth_date']
-        today = date.today()
-        age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
-
-        if age < 18:
-            raise ValidationError('You must be at least 18 years old to register.')
-        
-        return birth_date   
 
 
 
 class UserEditForm(forms.ModelForm):
-    birth_date = forms.DateField(widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}))  # Date picker
 
     class Meta:
         model = User
-        fields = [ 'email', 'birth_date', 'sex', 'user_type']
+        fields = ['name', 'email','sex', 'type']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control'}),
             'email': forms.EmailInput(attrs={'class': 'form-control'}),
             'sex': forms.Select(choices=User.SexType.choices, attrs={'class': 'form-control'}),
-            'user_type': forms.Select(choices=User.UserType.choices, attrs={'class': 'form-control'}),
+            'type': forms.Select(choices=User.UserType.choices, attrs={'class': 'form-control'}),
         }
 
     def __init__(self, *args, **kwargs):
@@ -296,9 +276,33 @@ class UserEditForm(forms.ModelForm):
         # Edit Permissions
         
         if not user.is_staff:
-            self.fields['user_type'].widget.attrs['readonly'] = 'readonly'
-            self.fields['companny'].widget.attrs['readonly'] = 'readonly'
+            self.fields['email'].widget.attrs['readonly'] = 'readonly'
+            self.fields['type'].widget.attrs['readonly'] = 'readonly'
             
-            if user.user_type == user.UserType.ADMIN:
-                self.fields['email'].widget.attrs['readonly'] = 'readonly'
+    
+            
+    def save(self, commit=True):
+        # Check if type has changed
+        instance = super(UserEditForm, self).save(commit=False)
+        
+        if self.instance.type != self.cleaned_data['type']:
 
+            # Clear old groups
+            instance.groups.clear()
+
+            # Add new groups
+            if self.cleaned_data['type'] == User.UserType.NORMAL:
+                group = Group.objects.get(name=User.UserType.NORMAL)
+                instance.groups.add(group)
+            if self.cleaned_data['type'] == User.UserType.STAFF:
+                group = Group.objects.get(name=User.UserType.STAFF)
+                instance.is_staff = True
+                instance.groups.add(group)
+            if self.cleaned_data['type'] == User.UserType.SUPERUSER:
+                group = Group.objects.get(name=User.UserType.SUPERUSER)
+                instance.is_superuser = True    
+                instance.groups.add(group)
+
+        if commit:
+            instance.save()
+        return instance

@@ -91,12 +91,9 @@ class TimeConditionForm(forms.ModelForm):
     def clean(self):
         cleaned_data = super().clean()
         minute = cleaned_data.get('minute')
-        hour = cleaned_data.get('hour')
 
         if minute == '*':
             self.add_error('minute', 'Minute cannot be "*"')
-        if hour == '*': 
-            self.add_error('hour', 'Hour cannot be "*"')
 
         return cleaned_data
     
@@ -136,6 +133,96 @@ class TaskForm(forms.ModelForm):
         # Filter users based on company type
 
 
+class TaskEditForm(forms.ModelForm):
+    
+    job = forms.ModelChoiceField(
+        queryset=Job.objects.all(),
+        required=False,
+        label='Job',
+        help_text='Select the job.',
+        widget=forms.Select(attrs={'class': 'form-select form-select-lg'})
+    )
+
+    class Meta:
+        model = Task
+        fields = ['log_path', 'job', 'debug_mode', 'step']
+        widgets = {
+            'log_path': forms.TextInput(attrs={'class': 'form-control'}),
+            'debug_mode': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'step': forms.NumberInput(attrs={'class': 'form-control'}),
+        }
+
+    
+
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop('user', None)  # Pass the user object to the form
+        
+        if user is None:
+            raise ValueError("User must not be None")
+        
+        super(TaskEditForm, self).__init__(*args, **kwargs)
+
+        # Edit Permissions
+        if not user.is_staff:
+            self.fields['log_path'].widget.attrs['readonly'] = 'readonly'
+            self.fields['debug_mode'].widget.attrs['readonly'] = 'readonly'
+            self.fields['job'].widget.attrs['readonly'] = 'readonly'
+    
+    def clean(self):
+        cleaned_data = super().clean() 
+
+        if self.instance.status in [Task.Status.STARTING, Task.Status.RUNNING]:
+            if self.instance.debug_mode != cleaned_data.get('debug_mode'):
+                self.add_error('debug_mode', "Cannot change debug_mode if current status is STARTING or RUNNING. Please change it to STOPPED first.")
+            
+            job = cleaned_data.get('job')
+            if job and self.instance.job_id != job.id: # use get to avoid keyerrors
+                self.add_error('job', "Cannot change job if current status is STARTING or RUNNING. Please change it to STOPPED first.")
+            if self.instance.step != cleaned_data.get('step'):
+                self.add_error('step', "Cannot change step if current status is STARTING or RUNNING. Please change it to STOPPED first.")
+            if self.instance.log_path != cleaned_data.get('log_path'):
+                self.add_error('log_path', "Cannot change log_path if current status is STARTING or RUNNING. Please change it to STOPPED first.")
+
+        return cleaned_data
+    
+    def save(self, commit=True):
+        # Check if type has changed
+        old_instance = Task.objects.get(pk=self.instance.pk)
+
+        instance = super(TaskEditForm, self).save(commit=False)
+        
+        # Check if the status is STARTING or RUNNING
+        if old_instance.status in [Task.Status.STARTING, Task.Status.RUNNING]:
+            
+            if old_instance.debug_mode != self.cleaned_data['debug_mode']:
+                self.add_error('debug_mode', "Cannot change debug_mode if status is STARTING or RUNNING.")
+            
+            if old_instance.job_id != self.cleaned_data['job']:
+                self.add_error('job', "Cannot change job if status is STARTING or RUNNING.")
+            
+            if old_instance.step != self.cleaned_data['step']:
+                self.add_error('step', "Cannot change step if status is STARTING or RUNNING.")
+            
+            if old_instance.log_path != self.cleaned_data['log_path']:
+                self.add_error('log_path', "Cannot change log_path if status is STARTING or RUNNING.")
+            
+            # Abort save if there are errors
+            if self.errors:
+                return old_instance
+            
+        # Commit the changes
+        if commit:
+            instance.save()
+        
+        # Change the status if it has changed, to reflect the new status
+        if self.instance.status != old_instance.status:
+            self.instance.change_status(self.instance.status)
+            
+        return instance
+
+
+
+
 class JobForm(forms.ModelForm):
     
     starting_condition_type = forms.ModelChoiceField(
@@ -162,11 +249,12 @@ class JobForm(forms.ModelForm):
 
     class Meta:
         model = Job
-        fields = ['name', 'type',  'starting_condition_type', 'stopping_condition_type']
+        fields = ['name', 'type',  'starting_condition_type', 'stopping_condition_type','continue_mode']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Enter the name of the job'}),
             'type': forms.Select(attrs={'class': 'form-select form-select-lg'}),
             'parent_task': forms.Select(attrs={'class': 'form-select form-select-lg'}),
+            'continue_mode': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
         
 
@@ -183,18 +271,20 @@ class JobForm(forms.ModelForm):
             Q(app_label='task_app', model='timecondition') 
         )
     
-    def save(self,starting_condition_form = None,stopping_condition_form = None, *args, **kwargs):
+    def save(self,starting_condition_form = None,stopping_condition_form = None, created_by = None, *args, **kwargs):
         
         
         # Create or update the Job instance
         job = super().save(commit=False)
+        
+        job.created_by = created_by
         
         
         if starting_condition_form:
             job.starting_condition = starting_condition_form.save()
             
         if stopping_condition_form:
-            job.stopping_condition = stopping_condition_form.save()  
+            job.stopping_condition = stopping_condition_form.save()
         
         # Call the original save method
         job.save()

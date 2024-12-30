@@ -16,7 +16,7 @@ from celery.result import AsyncResult
 from celery.app.control import Control
 
 ## Django Celery Beat
-from django_celery_beat.models import CrontabSchedule
+from django_celery_beat.models import CrontabSchedule, PeriodicTask, IntervalSchedule
 
 ### App-specific imports
 
@@ -80,6 +80,7 @@ class TimeCondition(Condition):
         CrontabSchedule,
         on_delete=models.CASCADE,
     )
+    periodic_task = models.OneToOneField(PeriodicTask, on_delete=models.CASCADE, null=True, blank=True)
     
     def __str__(self):
         return f"{self.id} - Crontab: {self.crontab}"
@@ -103,11 +104,7 @@ class Job(BaseTask):
         last_run (DateTime): Last run time of the job.
     """
     name = models.CharField(max_length=255, verbose_name="Job Name", unique=True)
-    company = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jobs', verbose_name="Company")
     log_path = models.CharField(max_length=255)
-    enabled = models.BooleanField(default=True)
-    parent_task = models.ForeignKey('Task', on_delete=models.SET_NULL, blank=True, null=True, related_name='jobs')
-    parent_job = models.ForeignKey('Job', on_delete=models.SET_NULL, blank=True, null=True, related_name='child_jobs')
     
     starting_condition_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, related_name='start_condition_type', null=True)
     starting_condition_id = models.PositiveIntegerField(null=True)
@@ -118,12 +115,74 @@ class Job(BaseTask):
     stopping_condition = GenericForeignKey('stopping_condition_type', 'stopping_condition_id')
 
     continue_mode = models.BooleanField(default=False)
-    last_run = models.DateTimeField(null=True, blank=True)
+    
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='jobs')
+    enabled = models.BooleanField(default=True)
+    
+    @property
+    def last_run(self):
+        """
+        Returns the last finished date of the tasks associated with this job.
+        """
+        last_task = self.tasks.filter(status=Task.Status.FINISHED).order_by('-finished_at').first()
+        return last_task.finished_at if last_task else None
+
+    class Meta:
+        permissions = [
+            ("can_view_job", "Can view Job's details"),
+            ("can_view_jobs", "Can view Jobs list"),
+            ("can_create_job", "Can create Job"),
+            ("can_edit_job", "Can edit Job"),
+            
+            ("can_pause_job", "Can pause Job"),
+            ("can_resume_job", "Can resume Job"),
+            ("can_delete_job", "Can delete Job"),
+        ]
+    
+    def save(self, *args, **kwargs):
+        """
+        Save the job and create/update the associated periodic task.
+        """
         
+        # We need to pre-save the job to get the ID
+        super().save(*args, **kwargs)
+        
+        # Create/Update Starting condition
+        
+        # When Starting condition is a TimeCondition
+        if self.starting_condition and isinstance(self.starting_condition, TimeCondition):
+            if not self.starting_condition.periodic_task:
+                self.starting_condition.periodic_task = PeriodicTask.objects.create(
+                    crontab=self.starting_condition.crontab,
+                    name=f"Job Starting Condition: {self.name}",
+                    task='apps.task_app.tasks._launch_job',
+                    args=json.dumps([self.id]),
+                    enabled=self.enabled,
+                )
+                self.starting_condition.save()
+        
+        # Create/Update Stopping condition
+        
+        # When Stopping condition is a TimeCondition
+        if self.stopping_condition and isinstance(self.stopping_condition, TimeCondition):
+            if not self.stopping_condition.periodic_task:
+                self.stopping_condition.periodic_task = PeriodicTask.objects.create(
+                    crontab=self.stopping_condition.crontab,
+                    name=f"Job Stopping Condition: {self.name}",
+                    task='apps.task_app.tasks._stop_job_task',
+                    args=json.dumps([self.id]),
+                    enabled=self.enabled,
+                )
+                
+            self.stopping_condition.save()
+
+        super().save(*args, **kwargs)
+
     def delete(self, *args, **kwargs):
         """
-        Deletes the job and its associated conditions if they exist.
+        Deletes the job and its associated periodic task and conditions if they exist.
         """
+
         if self.stopping_condition:
             self.stopping_condition.delete()
         if self.starting_condition:
@@ -131,21 +190,26 @@ class Job(BaseTask):
         
         super().delete(*args, **kwargs)
 
-    def pause_task(self):
+    def pause(self):
         """
-        Pauses the periodic task associated with this job.
+        Pauses the periodic task and the task associated with this job.
         """
-        if self.periodic_task:
-            self.periodic_task.enabled = False
-            self.periodic_task.save()
 
-    def resume_task(self):
+        self.enabled = False
+        if self.starting_condition and isinstance(self.starting_condition, TimeCondition):
+            self.starting_condition.periodic_task.enabled = False
+            self.starting_condition.periodic_task.save()
+        self.save()
+
+    def resume(self):
         """
         Resumes the periodic task associated with this job.
         """
-        if self.periodic_task:
-            self.periodic_task.enabled = True
-            self.periodic_task.save()
+        self.enabled = True
+        if self.starting_condition and isinstance(self.starting_condition, TimeCondition):
+            self.starting_condition.periodic_task.enabled = True
+            self.starting_condition.periodic_task.save()
+        self.save()
 
 
 
@@ -157,20 +221,19 @@ class Task(BaseTask):
 
     Attributes:
         started_at (DateTime): The start time of the task.
-        paused_at (DateTime): The time when the task was paused.
+        stopped_at (DateTime): The time when the task was paused/stopped.
         resumed_at (DateTime): The time when the task was resumed.
         finished_at (DateTime): The time when the task was finished.
         log_path (str): Path for log storage.
-        sql_file (str): SQL file path for the task.
         celery_task_id (str): Celery task ID.
         job (ForeignKey): The job associated with this task.
         debug_mode (bool): Whether the task is in debug mode.
         status (str): Status of the task, e.g., STARTING, RUNNING, CANCELED.
     """
     started_at = models.DateTimeField(auto_now=True)
-    finished_at = models.DateTimeField(null=True)
+    finished_at = models.DateTimeField(null=True,blank=True)
+    stopped_at = models.DateTimeField(null=True,blank=True)
     log_path = models.CharField(max_length=255, null=True, blank=True)
-    sql_file = models.CharField(max_length=255, null=True, blank=True)
     
     job = models.ForeignKey(Job, on_delete=models.CASCADE, blank=True, null=True, related_name='tasks')
     debug_mode = models.BooleanField(default=False)
@@ -181,6 +244,7 @@ class Task(BaseTask):
         PAUSED = 'PAUSED', 'Paused'
         RUNNING = 'RUNNING', 'Running'
         CANCELED = 'CANCELED', 'Canceled'
+        STOPPED = 'STOPPED', 'Stopped' # Stop is used when the task is stopped by as Stopping condition
         FAILED = 'FAILED', 'Failed'
         FINISHED = 'FINISHED', 'Finished'
 
@@ -193,16 +257,16 @@ class Task(BaseTask):
     
     class Meta:
         permissions = [
-            ("can_view_task", "Can view task's details"),
-            ("can_view_tasks", "Can view tasks list"),
-            ("can_create_task", "Can create task"),
-            ("can_edit_task", "Can edit task"),
+            ("can_view_task", "Can view Task's details"),
+            ("can_view_tasks", "Can view Tasks list"),
+            ("can_create_task", "Can create Task"),
+            ("can_edit_task", "Can edit Task"),
             
-            ("can_restart_task", "Can restart task"),
-            ("can_pause_task", "Can pause task"),
-            ("can_resume_task", "Can resume task"),
-            ("can_cancel_task", "Can cancel task"),
-            ("can_delete_task", "Can delete task"),
+            ("can_restart_task", "Can restart Task"),
+            ("can_pause_task", "Can pause Task"),
+            ("can_resume_task", "Can resume Task"),
+            ("can_cancel_task", "Can cancel Task"),
+            ("can_delete_task", "Can delete Task"),
         ]
     
     def __str__(self):
@@ -264,21 +328,56 @@ class Task(BaseTask):
         if self.status == Task.Status.RUNNING:
             # stop celery task
             self.kill_current_celery_task()
-
-            
-            self.paused_at = timezone.now()
+            self.stopped_at = timezone.now()
             self.status = Task.Status.PAUSED
             self.save()
 
         
     def resume(self):
         
-        if self.status == Task.Status.PAUSED:
+        if self.status == Task.Status.PAUSED or self.status == Task.Status.STOPPED:
 
             self.resumed_at = timezone.now()
             self.save()
             self.launch(continue_mode=True)
+            
+    def stop(self):
+        if self.status == Task.Status.RUNNING:
+            # stop celery task
+            self.kill_current_celery_task()
+            self.stopped_at = timezone.now()
+            self.status = Task.Status.STOPPED
+            self.save()
+
     
+    def change_status(self, status):
+        
+        if status == Task.Status.PAUSED:
+            self.pause()
+        elif status == Task.Status.CANCELED:
+            self.cancel()
+        elif status == Task.Status.STOPPED:
+            self.stop()
+        elif status == Task.Status.RUNNING or status == Task.Status.STARTING:
+            self.restart()
+        elif status == Task.Status.FINISHED:
+            self.finish()
+        elif status == Task.Status.FAILED:
+            self.fail()
+        
+    
+    def finish(self):
+        self.finished_at = timezone.now()
+        self.status = Task.Status.FINISHED
+        self.kill_current_celery_task()
+        self.save()
+    
+    def fail(self):
+        self.finished_at = timezone.now()
+        self.status = Task.Status.FAILED
+        self.kill_current_celery_task()
+        self.save()
+        
     def kill_current_celery_task(self):
         """
         Kills the task by revoking the Celery task
@@ -286,6 +385,8 @@ class Task(BaseTask):
         # stop celery task
         result = AsyncResult(self.celery_tasks.last().celery_task_id, app=app)
         result.revoke(terminate=True)
+        
+    
     
             
 class CeleryTask(models.Model):

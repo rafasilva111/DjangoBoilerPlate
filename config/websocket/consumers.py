@@ -18,7 +18,7 @@ from channels.generic.websocket import JsonWebsocketConsumer
 ### App-specific imports
 
 ## Models
-from apps.task_app.models import Task
+from apps.task_app.models import Task, Job
 
 import os
 import json
@@ -28,7 +28,7 @@ from asgiref.sync import async_to_sync
 from apps.task_app.models import Task
 
 
-class LogConsumer(AsyncJsonWebsocketConsumer):
+class TaskLogConsumer(AsyncJsonWebsocketConsumer):
     """
     WebSocket consumer for streaming log data from a task to a connected client.
 
@@ -118,3 +118,73 @@ class LogConsumer(AsyncJsonWebsocketConsumer):
 
         await self.channel_layer.group_discard(self.task_group_name, self.channel_name)
 
+
+class JobLogConsumer(AsyncJsonWebsocketConsumer):
+    """
+    WebSocket consumer for streaming log data from a job to a connected client.
+
+    Attributes:
+        log_file_path (str): Path to the log file of the job.
+        log_file (file): File object for the job's log file.
+    """
+
+    async def get_job(self, job_id):
+        """
+        Fetches the Job instance with the specified job ID from the database.
+
+        Args:
+            job_id (int): The ID of the job to retrieve.
+
+        Returns:
+            Job: The Job instance if found, or None if not found.
+        """
+        try:
+            job = await Job.objects.aget(id=job_id)
+            return job
+        except Job.DoesNotExist:
+            return None
+
+    async def connect(self):
+        """
+        Handles the WebSocket connection by associating the client with a job's log stream.
+        """
+        job_id = self.scope['url_route']['kwargs']['job_id']
+        job = await self.get_job(job_id)
+        if job is None:
+            await self.close()
+            return
+
+        self.log_file_path = job.log_path
+
+        if self.log_file_path and os.path.isfile(self.log_file_path):
+            await self.accept()
+            self.log_file = open(self.log_file_path, 'r')
+            self.log_file.seek(0, os.SEEK_END)
+            asyncio.create_task(self.stream_log_data())
+        else:
+            await self.close()
+
+    async def stream_log_data(self):
+        """
+        Periodically checks for new lines in the log file and sends them to the client.
+        """
+        try:
+            while True:
+                line = self.log_file.readline()
+                if line:
+                    await self.send_json({
+                        "type": "log_line",
+                        "line": line
+                    })
+                else:
+                    await asyncio.sleep(1)
+        except Exception as e:
+            print(f"Error in stream_log_data: {e}")
+            await self.close()
+
+    async def disconnect(self, close_code):
+        """
+        Handles the WebSocket disconnection by closing the log file if open.
+        """
+        if hasattr(self, 'log_file') and self.log_file:
+            self.log_file.close()

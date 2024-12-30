@@ -13,7 +13,7 @@ from django.urls import  path
 #
 
 from apps.task_app.views import JobTableView, JobCreateView , JobDetailView, job_delete, job_pause, job_resume\
-    , TaskTableView, TaskDetailView, TaskCreateView, TaskUpdateView, task_delete, task_restart, task_cancel, task_pause, task_resume
+    , TaskTableView, TaskDetailView, TaskCreateView, TaskEditView, task_delete, task_restart, task_cancel, task_pause, task_resume
 
 
 ###
@@ -43,7 +43,7 @@ urlpatterns = [
     path("tasks", TaskTableView.as_view(), name="tasks"),
     path("task/create", TaskCreateView.as_view(), name="task_create"),
     path("task/<int:id>", TaskDetailView.as_view(), name="task_detail"),
-    path("task/<int:id>/edit", TaskUpdateView.as_view(), name="task_edit"),
+    path("task/<int:id>/edit", TaskEditView.as_view(), name="task_edit"),
     path("task/<int:id>/restart", task_restart, name="task_restart"),
     path("task/<int:id>/cancel", task_cancel, name="task_cancel"),
     path("task/<int:id>/pause", task_pause, name="task_pause"),

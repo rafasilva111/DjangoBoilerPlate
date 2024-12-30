@@ -26,7 +26,7 @@ main_logger = logging.getLogger('django')
 ##
 
 @app.task
-def _init_job(job_id):
+def _launch_job(job_id):
     """
     Initializes a job, creating or resuming associated tasks as needed.
 
@@ -37,7 +37,7 @@ def _init_job(job_id):
     Args:
         job_id (int): ID of the Job to initialize.
     """
-    from apps.task_app.models import Job, MaxRecordsCondition, Task
+    from apps.task_app.models import Job, Task
 
     try:
         job = Job.objects.get(id=job_id)
@@ -45,46 +45,88 @@ def _init_job(job_id):
         main_logger.error(f'Job {job_id} does not exist')
         return
 
-    job.last_run = timezone.now()
-    job.save()
+    if not job.enabled:
+        return
 
     # Configure job-specific logging
-    job_logger, log_info_path = configure_task_logging(job)
-    job.log_path = log_info_path
+    job_logger, job.log_path = configure_job_logging(job)
+    job.save()
 
     # Determine the status of the last task
-    job_logger.info(f'Job {job_id} was started.')
+    job_logger.info(f'')
+    job_logger.info(f'')
+    job_logger.info(f'Job Starting Condition triggered.')
+    job_logger.info(f'')
+    
+    # Check if the job is in continue mode, which means resuming the last task if it exists
     current_task = job.tasks.order_by('-created_at').first()
-    job_logger.info(f'Current Task: {current_task}')
-
-    if current_task is None:
-        job_logger.info(f'No existing task. Creating new task.')
-    elif current_task.status == Task.Status.FINISHED:
-        job_logger.info(f'Task {current_task.id} has finished. Creating new task.')
-    elif current_task.status == Task.Status.PAUSED:
-        current_task.resume()
-        return
+    job_logger.info(f'Checking for existing tasks...')
+    
+    if job.continue_mode:
+        if current_task is None:
+            job_logger.info(f'No existing task. Creating new task.')
+        elif current_task.status == Task.Status.FINISHED:
+            job_logger.info(f'Task {current_task.id} has finished. Creating new task.')
+        elif current_task.status == Task.Status.PAUSED:
+            job_logger.info(f'Task {current_task.id} has been resumed.')
+            current_task.resume()
+            return
+        else:
+            job_logger.info(f'Job {job_id} was not started due to Task {current_task.id} with status {current_task.status}.')
+            return
     else:
-        main_logger.info(f'Job {job_id} was not started due to Task {current_task.id} with status {current_task.status}.')
+        job_logger.info(f'Creating new task.')
+
+    task = Task.objects.create(
+        type=job.type,
+        job=job,
+    )
+    task.save()
+    
+    # You dont need to call the launch method here, the signal will do it for you
+    job_logger.info(f'')
+    job_logger.info(f'Task {task.id} created.')
+    
+        
+@app.task
+def _stop_job_task(job_id):
+    
+    from apps.task_app.models import Job, Task
+
+    try:
+        job = Job.objects.get(id=job_id)
+    except Job.DoesNotExist:
+        main_logger.error(f'Job {job_id} does not exist')
         return
 
-    # Check for a stopping condition
-    stopping_condition_max_records = None
-    if isinstance(job.starting_condition, MaxRecordsCondition):
-        stopping_condition_max_records = job.starting_condition.max_records
-        job_logger.info(f'Task has a stopping condition: {stopping_condition_max_records}')
+    if not job.enabled:
+        return
 
-    # Create a new task
-    task = Task.objects.create(
-        company=job.company,
-        type=job.type,
-        parent_task=job.parent_task,
-        job=job,
-        stopping_condition_max_records=stopping_condition_max_records
-    )
-    job_logger.info(f'Starting task {task.id}')
-    task.start()
+    # Configure job-specific logging
+    job_logger, job.log_path = configure_job_logging(job)
+    job.save()
 
+    # Get the current task
+    current_task = job.tasks.order_by('-created_at').first()
+    
+    # Determine the status of the last task
+    job_logger.info(f'')
+    job_logger.info(f'')
+    job_logger.info(f'Job Stopping Condition triggered.')
+    job_logger.info(f'')
+    
+    if job.continue_mode:
+        job_logger.info(f'Pausing current active Task ( {current_task.id} ).')
+        current_task.pause()
+        job_logger.info(f'')
+        job_logger.info(f'Task {current_task.id} Stopped.')
+    else:
+        job_logger.info(F'Stopping current active Task ( {current_task.id} ).')
+        current_task.stop()
+        job_logger.info(f'')
+        job_logger.info(f'Task {current_task.id} Stopped.')
+
+    
 
 ###
 # Task Functions
@@ -158,16 +200,20 @@ def test_task(logger, task, max_count=10000, continue_mode=True):
     if max_count < 0:
         raise Exception("Max Count cannot be less than 0")
 
-    counter = task.step + 1 if continue_mode else 1
+    counter = task.step if continue_mode else 1
 
-    while counter <= max_count:
+    while counter < max_count:
         logger.info(f"Counting at: {counter}")
         time.sleep(1)
+        
         counter += 1
         
-        # Save state We need to do this to avoid losing the counter value in case of failure or pause
+        # Save state to avoid losing the counter value in case of failure or pause
         task.step = counter
-        task.save() 
+        task.save()
+    
+    # Log the final count
+    logger.info(f"Counting at: {counter}")
 
     # Update task status to finished
     task.finished_at = timezone.now()

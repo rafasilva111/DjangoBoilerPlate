@@ -57,7 +57,7 @@ from apps.task_app.models import Job, Task
 #   Forms
 #
 
-from apps.task_app.forms import  TaskForm, JobForm, TimeConditionForm
+from apps.task_app.forms import  TaskForm, JobForm, TimeConditionForm, TaskEditForm
 
 
 ##
@@ -86,36 +86,215 @@ from apps.common.constants import WEBSOCKET_HOST
 
 
 @method_decorator(login_required, name="dispatch")
-class JobTableView(TemplateView):
+class JobTableView(PermissionRequiredMixin, TemplateView):
+    """
+    A view class that displays a paginated table of jobs with filtering capabilities.
+    This view requires user authentication and specific permission to view jobs.
+    It extends TemplateView and implements PermissionRequiredMixin for access control.
+
+    Attributes:
+        template_name (str): Path to the template used to render the job table.
+        page_size (int): Default number of items per page.
+        permission_required (str): Permission required to access this view.
+
+    Methods:
+        get_context_data(**kwargs): Prepares and returns the context data for template rendering.
+            - Initializes template layout.
+            - Retrieves and orders all jobs.
+            - Applies filtering based on request parameters.
+            - Implements pagination.
+            - Adds create job permission check.
+    """
+
     template_name = "task_app/job/table.html"
+    permission_required = "task_app.can_view_jobs"
     page_size = 10
 
     def get_context_data(self, **kwargs):
+        """
+        Prepares and returns the context data for template rendering.
+        - Initializes template layout.
+        - Retrieves and orders all jobs.
+        - Applies filtering based on request parameters.
+        - Implements pagination.
+        - Adds create job permission check.
+
+        Returns:
+            dict: Context containing:
+                - filter: Filtered queryset of jobs.
+                - page_obj: Paginator object with job records.
+                - can_create_job: Boolean indicating if user can create jobs.
+                - can_edit_job: Boolean indicating if user can edit jobs.
+                - can_view_job: Boolean indicating if user can view jobs.
+                - can_delete_job: Boolean indicating if user can delete jobs.
+        """
+        # Initialize template layout
         context = TemplateLayout.init(self, super().get_context_data(**kwargs))
 
+        # Retrieve and order all jobs
         records = Job.objects.all().order_by("-id")
+        
+        # Apply filtering based on request parameters
         filter = JobFilter(self.request.GET, queryset=records)
         filtered_records = filter.qs
-
-        #
-
+        
+        # Implement pagination
         page_size = int(self.request.GET.get("page_size", self.page_size))
-
-        paginator = Paginator(filtered_records, page_size)  # Show 10 tasks per page
+        paginator = Paginator(filtered_records, page_size) 
         page_number = self.request.GET.get("page")
         page_obj = paginator.get_page(page_number)
 
-        context["filter"] = filter
-        context["page_obj"] = page_obj
+        # Add create job permission check
+        context.update(
+            {
+                "filter": filter,
+                "page_obj": page_obj,
+                "can_create_job": self.request.user.has_perm(
+                    "task_app.can_create_job"
+                ),
+                "can_edit_job": self.request.user.has_perm(
+                    "task_app.can_edit_job"
+                ),
+                "can_view_job": self.request.user.has_perm(
+                    "task_app.can_view_job"
+                ),
+                "can_delete_job": self.request.user.has_perm(
+                    "task_app.can_delete_job"
+                ),
+            }
+        )
+        
+        return context
+
+
+@method_decorator(login_required, name='dispatch')
+class JobDetailView(PermissionRequiredMixin, TemplateView):
+    """
+    A view class for displaying job details.
+
+    This class handles the display of job-specific information and associated log files.
+    Requires user authentication to access the view.
+
+    Attributes:
+        template_name (str): The template used for rendering the job detail view.
+        page_size (int): Number of items to display per page.
+        permission_required (str): The required permission to access this view.
+
+    Methods:
+        get_context_data(**kwargs): Prepares and returns the context data for template rendering.
+
+    Parameters:
+        kwargs["id"] (int): The ID of the job to be displayed.
+
+    Returns:
+        dict: Context dictionary containing:
+            - record: Job object retrieved from database.
+            - log: Content of the job's log file (if exists).
+            - WEBSOCKET_HOST: WebSocket host configuration.
+            - Additional template layout context data.
+    """
+    
+    template_name = "task_app/job/detail.html"
+    permission_required = "task_app.can_view_job"
+    page_size = 10
+
+    def get_context_data(self, **kwargs):
+        """
+        Prepares and returns the context data for template rendering.
+        - Initializes template layout.
+        - Retrieves the job by ID.
+        - Reads the job's log file if it exists.
+        - Adds WebSocket host configuration.
+
+        Returns:
+            dict: Context dictionary containing:
+                - record: Job object retrieved from database.
+                - log: Content of the job's log file (if exists).
+                - WEBSOCKET_HOST: WebSocket host configuration.
+        """
+        # Initialize template layout
+        context = TemplateLayout.init(self, super().get_context_data(**kwargs))
+        
+        # Retrieve the Job by ID
+        context["record"] = Job.objects.get(id=kwargs["id"])
+
+        # Retrieve the Job's Tasks
+        records = context["record"].tasks.all().order_by("-started_at")
+        
+        # Apply filtering based on request parameters
+        filter = TaskFilter(self.request.GET, queryset=records)
+        filtered_records = filter.qs
+        
+        # Implement pagination
+        page_size = int(self.request.GET.get("page_size", self.page_size))
+        paginator = Paginator(filtered_records, page_size)
+        page_number = self.request.GET.get("page")
+        page_obj = paginator.get_page(page_number)
+        
+        # Read the job's log file if it exists
+        log_path = context["record"].log_path
+        if log_path and path.isfile(log_path):
+            with open(log_path, "r") as log_file:
+                context["log"] = log_file.read()
+                
+        # Create context
+        context.update(
+            {
+                "WEBSOCKET_HOST": WEBSOCKET_HOST,
+                "filter": filter,
+                "page_obj": page_obj,
+                "can_stop_job": self.request.user.has_perm(
+                    "task_app.can_stop_job"
+                ),
+                "can_resume_job": self.request.user.has_perm(
+                    "task_app.can_resume_job"
+                ),
+                "can_delete_job": self.request.user.has_perm(
+                    "task_app.can_delete_job"
+                ),
+            }
+        )
 
         return context
 
 
-# @method_decorator(login_required, name='dispatch')
-class JobCreateView(TemplateView):
+@method_decorator(login_required, name='dispatch')
+class JobCreateView(PermissionRequiredMixin, TemplateView):
+    """
+    Class-based view for creating a new job.
+
+    This view requires users to be authenticated and have the 'task_app.can_create_job' permission.
+    It renders a form for job creation and handles both GET and POST requests.
+
+    Attributes:
+        template_name (str): Path to the template used for rendering the job creation form.
+        permission_required (str): Permission required to access this view.
+
+    Methods:
+        get_context_data(**kwargs): Adds form and layout context to template context.
+        post(request, *args, **kwargs): Handles form submission, saves job if valid, 
+            and redirects to job detail view.
+
+    Returns:
+        GET: Rendered template with job creation form.
+        POST: Redirects to job detail view on success, or re-renders form with errors.
+    """
+    
     template_name = "task_app/job/create.html"
+    permission_required = "task_app.can_create_job"
 
     def get_context_data(self, **kwargs):
+        """
+        Prepares and returns the context data for template rendering.
+        - Initializes template layout.
+        - Adds job form and time condition forms to context.
+
+        Returns:
+            dict: Context dictionary containing:
+                - form: JobForm instance.
+                - starting_condition_time_form: TimeConditionForm instance for starting condition.
+                - stopping_condition_time_form: TimeConditionForm instance for stopping condition.
+        """
         context = TemplateLayout.init(self, super().get_context_data(**kwargs))
         context["form"] = JobForm()
         context["starting_condition_time_form"] = TimeConditionForm(
@@ -127,6 +306,18 @@ class JobCreateView(TemplateView):
         return context
 
     def post(self, request, *args, **kwargs):
+        """
+        Handles form submission for creating a new job.
+        - Validates and saves the job form and time condition forms.
+        - Redirects to job detail view on success, or re-renders form with errors.
+
+        Args:
+            request (HttpRequest): The HTTP request object.
+
+        Returns:
+            HttpResponseRedirect: Redirects to job detail view on success.
+            HttpResponse: Re-renders form with errors on failure.
+        """
         job_form = JobForm(request.POST)
         starting_time_condition_form = TimeConditionForm(
             request.POST, prefix="starting_condition_time_form"
@@ -135,98 +326,57 @@ class JobCreateView(TemplateView):
             request.POST, prefix="stopping_condition_time_form"
         )
         
-
         if job_form.is_valid():
             starting_condition_form = None
             stopping_condition_form = None
 
-
             # Save the starting condition
-
             if job_form.instance.starting_condition_type:
                 if job_form.instance.starting_condition_type.name == "time condition":
-                
-
-            
                     if starting_time_condition_form.is_valid():
                         starting_condition_form = starting_time_condition_form
                     else:
                         # Collect all errors if any form is invalid
                         context = self.get_context_data()
-                        context["form"] = job_form
-                        context["starting_condition_time_form"] = (
-                            starting_time_condition_form
-                        )
-                        context["stopping_condition_time_form"] = (
-                            stopping_time_condition_form
-                        )
-
+                        context.update(
+                            {
+                                "form": job_form,
+                                "starting_condition_time_form": starting_time_condition_form,
+                                "stopping_condition_time_form": stopping_time_condition_form,
+                            }
+                        ) 
                         return self.render_to_response(context)
 
             # Save the stopping time condition
-
             if job_form.instance.stopping_condition_type:
-
                 if job_form.instance.stopping_condition_type.name == "time condition":
                     if stopping_time_condition_form.is_valid():
                         stopping_condition_form = stopping_time_condition_form
                     else:
                         # Collect all errors if any form is invalid
                         context = self.get_context_data()
-                        context["form"] = job_form
-                        context["starting_condition_time_form"] = (
-                            starting_time_condition_form
-                        )
-                        context["stopping_condition_time_form"] = (
-                            stopping_time_condition_form
-                        )
-                        
-
+                        context.update(
+                            {
+                                "form": job_form,
+                                "starting_condition_time_form": starting_time_condition_form,
+                                "stopping_condition_time_form": stopping_time_condition_form,
+                            }
+                        ) 
                         return self.render_to_response(context)
 
-                
-
-            job = job_form.save(starting_condition_form, stopping_condition_form)
-
+            job = job_form.save(starting_condition_form, stopping_condition_form, request.user)
             return redirect(reverse("job_detail", args=[job.id]))
 
-        # Collect all errors if any form is invalid
+        # Create context
         context = self.get_context_data()
-        context["form"] = job_form
-        context["starting_condition_time_form"] = starting_time_condition_form
-        context["stopping_condition_time_form"] = stopping_time_condition_form
-        
-
+        context.update(
+            {
+                "form": job_form,
+                "starting_condition_time_form": starting_time_condition_form,
+                "stopping_condition_time_form": stopping_time_condition_form,
+            }
+        )        
         return self.render_to_response(context)
-
-
-# @method_decorator(login_required, name='dispatch')
-class JobDetailView(TemplateView):
-    template_name = "task_app/job/detail.html"
-    page_size = 10
-
-    def get_context_data(self, **kwargs):
-
-        context = TemplateLayout.init(self, super().get_context_data(**kwargs))
-        context["record"] = Job.objects.get(id=kwargs["id"])
-
-        records = context["record"].tasks.all().order_by("-started_at")
-        filter = TaskFilter(self.request.GET, queryset=records)
-        filtered_records = filter.qs
-
-        #
-
-        page_size = int(self.request.GET.get("page_size", self.page_size))
-
-        paginator = Paginator(filtered_records, page_size)  # Show 10 tasks per page
-        page_number = self.request.GET.get("page")
-        page_obj = paginator.get_page(page_number)
-
-        context["filter"] = filter
-        context["page_obj"] = page_obj
-
-        return context
-
 
 ###
 #
@@ -234,30 +384,85 @@ class JobDetailView(TemplateView):
 #
 ##
 
-
 @require_GET
 def job_resume(request, id):
-    job = get_object_or_404(Job, id=id)
-    job.resume_task()
+    """
+    Resume a job instance and redirect to job detail page.
+    This view requires user authentication and 'can_resume_job' permission.
+    It retrieves a job by ID, calls its resume method, and redirects to the job detail page.
 
+    Args:
+        request: The HTTP request object.
+        id (int): The ID of the job to resume.
+
+    Returns:
+        HttpResponseRedirect: Redirects to the job detail page.
+
+    Raises:
+        PermissionDenied: If user doesn't have 'can_resume_job' permission.
+        Http404: If job with given ID is not found.
+
+    Requires:
+        - User must be logged in (@login_required).
+        - Request method must be GET (@require_GET).
+        - User must have 'task_app.can_resume_job' permission.
+    """
+    job = get_object_or_404(Job, id=id)
+    job.resume()
     return redirect(reverse("job_detail", args=[job.id]))
 
 
 @require_GET
 def job_pause(request, id):
-    job = get_object_or_404(Job, id=id)
-    job.pause_task()
+    """
+    Pause a job instance and redirect to job detail page.
+    This view requires user authentication and 'can_pause_job' permission.
+    It retrieves a job by ID, calls its pause method, and redirects to the job detail page.
 
+    Args:
+        request: The HTTP request object.
+        id (int): The ID of the job to pause.
+
+    Returns:
+        HttpResponseRedirect: Redirects to the job detail page.
+
+    Raises:
+        PermissionDenied: If user doesn't have 'can_pause_job' permission.
+        Http404: If job with given ID is not found.
+
+    Requires:
+        - User must be logged in (@login_required).
+        - Request method must be GET (@require_GET).
+        - User must have 'task_app.can_pause_job' permission.
+    """
+    job = get_object_or_404(Job, id=id)
+    job.pause()
     return redirect(reverse("job_detail", args=[job.id]))
 
 
 @login_required
 @require_GET
 def job_delete(request, id):
+    """
+    Delete a job instance.
+    This view function handles the deletion of a Job object. It requires the user to be
+    authenticated and to have the 'can_delete_job' permission. If the job with the given ID
+    exists, it will be deleted and the user will be redirected to the jobs list page.
+
+    Args:
+        request (HttpRequest): The HTTP request object.
+        id (int): The ID of the job to be deleted.
+
+    Returns:
+        HttpResponseRedirect: Redirects to the jobs list page after successful deletion.
+
+    Raises:
+        PermissionDenied: If the user doesn't have the required permission.
+        Http404: If the job with the given ID doesn't exist.
+    """
     instance = get_object_or_404(Job, id=id)
     instance.delete()
-
-    return redirect("job")
+    return redirect("jobs")
 
 
 ###
@@ -293,9 +498,8 @@ class TaskTableView(PermissionRequiredMixin, TemplateView):
     """
 
     template_name = "task_app/task/table.html"
-    page_size = 10
     permission_required = "task_app.can_view_tasks"
-    raise_exception = False
+    page_size = 10
 
     def get_context_data(self, **kwargs):
         """
@@ -312,6 +516,7 @@ class TaskTableView(PermissionRequiredMixin, TemplateView):
                 - page_obj: Paginator object with task records
                 - can_create_task: Boolean indicating if user can create tasks
         """
+        # Initialize template layout
         context = TemplateLayout.init(self, super().get_context_data(**kwargs))
 
         # Retrieve and order all tasks
@@ -323,7 +528,7 @@ class TaskTableView(PermissionRequiredMixin, TemplateView):
         
         # Implement pagination
         page_size = int(self.request.GET.get('page_size', self.page_size))
-        paginator = Paginator(filtered_records, page_size)  # Show 10 tasks per page
+        paginator = Paginator(filtered_records, page_size)
         page_number = self.request.GET.get('page')
         page_obj = paginator.get_page(page_number)
         
@@ -348,7 +553,6 @@ class TaskTableView(PermissionRequiredMixin, TemplateView):
         )
         
         return context
-
 
 @method_decorator(login_required, name="dispatch")
 class TaskDetailView(PermissionRequiredMixin,TemplateView):
@@ -377,9 +581,8 @@ class TaskDetailView(PermissionRequiredMixin,TemplateView):
             - Additional template layout context data
     """
     template_name = "task_app/task/detail.html"
-    page_size = 10
-
     permission_required = "task_app.can_view_task"
+    page_size = 10
 
     def get_context_data(self, **kwargs):
         """
@@ -405,9 +608,9 @@ class TaskDetailView(PermissionRequiredMixin,TemplateView):
         log_path = context["task"].log_path
         if log_path and path.isfile(log_path):
             with open(log_path, "r") as log_file:
-                context["log"] = log_file.read()  # Read the entire content of the log file
+                context["log"] = log_file.read()
         
-        # Add create task permission check
+        # Create context
         context.update(
             {
                 "WEBSOCKET_HOST": WEBSOCKET_HOST,
@@ -452,9 +655,8 @@ class TaskCreateView(PermissionRequiredMixin, TemplateView):
         GET: Rendered template with task creation form
         POST: Redirects to task detail view on success, or re-renders form with errors
     """
-    
-    template_name = "task_app/task/create.html"
 
+    template_name = "task_app/task/create.html"
     permission_required = "task_app.can_create_task"
 
     def get_context_data(self, **kwargs):
@@ -480,51 +682,80 @@ class TaskCreateView(PermissionRequiredMixin, TemplateView):
 
 
 @method_decorator(login_required, name="dispatch")
-class TaskUpdateView(PermissionRequiredMixin, TemplateView): #todo  
+class TaskEditView(PermissionRequiredMixin, TemplateView):
     """
-    Class-based view for creating a new task.
+    View for editing a user.
 
-    This view requires users to be authenticated and have the 'task_app.can_create_task' permission.
-    It renders a form for task creation and handles both GET and POST requests.
+    Inherits from:
+        PermissionRequiredMixin: Ensures the user has the required permissions.
+        TemplateView: Renders a template.
 
     Attributes:
-        template_name (str): Path to the template used for rendering the task creation form.
-        permission_required (str): Permission required to access this view.
+        template_name (str): The path to the template used for rendering the view.
+        permission_required (str): The permission required to access this view.
+        form_class (UserEditForm): The form class used for editing the user.
 
     Methods:
-        get_context_data(**kwargs): Adds form and layout context to template context.
-        post(request, *args, **kwargs): Handles form submission, saves task if valid, 
-            and redirects to task detail view.
+        get_object(): Retrieves the User object or raises a 404 error.
+        get_context_data(**kwargs): Adds the UserEditForm to the context.
+        post(request, *args, **kwargs): Handles form submission for editing a user.
 
-    Returns:
-        GET: Rendered template with task creation form
-        POST: Redirects to task detail view on success, or re-renders form with errors
+
+        Returns:
+            User: The user object retrieved by ID.
+
+
+        Args:
+            **kwargs: Additional context data.
+
+        Returns:
+            dict: The context data including the form.
+
+
+        Args:
+            request (HttpRequest): The HTTP request object.
+            *args: Additional positional arguments.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            HttpResponse: The HTTP response object.
     """
-    
-    template_name = "task_app/task/create.html"
+    template_name = 'task_app/task/edit.html'
+    permission_required = "task_app.change_task"
+    permission_required = 'auth.change_user'
+    form_class = TaskEditForm
 
-    permission_required = "task_app.can_edit_task"
+    def get_object(self):
+        """
+        Retrieve the User object or raise a 404 error.
+        """
+        instance_id = self.kwargs.get('id')
+        return get_object_or_404(Task, id=instance_id)
 
     def get_context_data(self, **kwargs):
-        # A function to init the global layout. It is defined in web_project/__init__.py file
+        """
+        Add the UserEditForm to the context.
+        """
         context = TemplateLayout.init(self, super().get_context_data(**kwargs))
-        context["form"] = TaskForm()
-
+        instance = self.get_object()
+        context['form'] = self.form_class(instance=instance, user=self.request.user)
         return context
 
     def post(self, request, *args, **kwargs):
-
-        form = TaskForm(request.POST)
+        """
+        Handle form submission for editing a user.
+        """
+        user = self.get_object()
+        form = self.form_class(request.POST, instance=user, user=request.user)
 
         if form.is_valid():
-            instance = form.save()
-            return redirect(reverse("task_detail", args=[instance.id]))
+            form.save()
+            return redirect(reverse("task_detail", args=[user.id]))
 
-        # Use get_context_data to include layout_path and other context variables
-        context = self.get_context_data(**kwargs)
-        context["form"] = form
-
-        return render(request, self.template_name, context)
+        # Re-render the form with errors
+        context = self.get_context_data()
+        context['form'] = form
+        return self.render_to_response(context)
 
 
 ###
