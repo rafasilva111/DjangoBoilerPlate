@@ -10,7 +10,7 @@ from django.dispatch import receiver
 from celery.signals import task_failure
 
 ## Models
-from apps.task_app.models import Task
+from apps.task_app.models import Task, CeleryTask
 
 
 @receiver(post_save, sender=Task)
@@ -67,3 +67,48 @@ def task_failure_handler(sender=None, task_id=None, exception=None, args=None, k
         task = Task.objects.get(celery_task_id=task_id)
         task.status = Task.Status.FAILED
         task.save()
+
+
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
+# Your signal handler
+async def send_chat_message(task_id, message):
+    channel_layer = get_channel_layer()
+    group_name = f"teste"
+
+    # Send message to the WebSocket group
+    await channel_layer.group_send(
+        group_name,
+        {
+            'type': 'chat_message',
+            'message': message
+        }
+    )
+
+from celery.signals import task_success
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
+# Celery task success signal handler
+@task_success.connect
+def task_success_handler(sender, result, **kwargs):
+    
+    #celery_task_id = sender.request.id  
+
+    try:
+        task = CeleryTask.objects.get(celery_task_id=sender.request.id).task
+    except CeleryTask.DoesNotExist: # This might happen when Job is triggered
+        return
+
+    # Send the message to the appropriate WebSocket group (task-specific group)
+    channel_layer = get_channel_layer()
+    
+    async_to_sync(channel_layer.group_send)(
+            f"task_{task.id}",  # Room group name
+            {
+                'type': 'celery_task_update',  # The name of the method in the consumer to call
+                'status': task.status,
+                'finished_at': task.finished_at.strftime('%d de %B de %Y às %H:%M')
+            }
+        )

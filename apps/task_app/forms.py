@@ -33,7 +33,7 @@ from django_celery_beat.models import CrontabSchedule, PeriodicTask
 
 ##
 #   Models
-from apps.task_app.models import Task, Job, ContentType, TimeCondition, MaxRecordsCondition
+from apps.task_app.models import Task, Job, ContentType, TimeCondition
 from apps.user_app.models import User
 
 
@@ -45,32 +45,6 @@ HOURS_CHOICES = [('*', '*')] + [(str(i), str(i)) for i in range(24)]
 DAY_OF_WEEK_CHOICES = [('*', '*')] + [(str(i), str(i)) for i in range(7)]
 DAY_OF_MONTH_CHOICES = [('*', '*')] + [(str(i), str(i)) for i in range(1, 32)]
 MONTH_OF_YEAR_CHOICES = [('*', '*')] + [(str(i), str(i)) for i in range(1, 13)]
-
-class MaxRecordsConditionForm(forms.ModelForm):
-    
-    max_records = forms.IntegerField(
-        required=True,
-        initial=0,
-        widget=forms.NumberInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'The Job will stop after this number of records are processed'
-        })
-    )
-    class Meta:
-        model = MaxRecordsCondition
-        fields = ['max_records']
-    
-    def clean(self):
-        cleaned_data = super().clean()
-        max_records = cleaned_data.get('max_records')
-
-        if max_records == 0:
-            self.add_error('max_records', 'Maximum records cannot be 0')
-
-
-        return cleaned_data
-        
-    
 
 
 class TimeConditionForm(forms.ModelForm):
@@ -117,12 +91,9 @@ class TimeConditionForm(forms.ModelForm):
     def clean(self):
         cleaned_data = super().clean()
         minute = cleaned_data.get('minute')
-        hour = cleaned_data.get('hour')
 
         if minute == '*':
             self.add_error('minute', 'Minute cannot be "*"')
-        if hour == '*': 
-            self.add_error('hour', 'Hour cannot be "*"')
 
         return cleaned_data
     
@@ -151,10 +122,9 @@ class TimeConditionForm(forms.ModelForm):
 class TaskForm(forms.ModelForm):
     class Meta:
         model = Task
-        fields = ['type', 'stopping_condition_max_records', 'debug_mode']
+        fields = ['type',  'debug_mode']
         widgets = {
             'type': forms.Select(attrs={'class': 'form-select form-select-lg'}),
-            'stopping_condition_max_records': forms.NumberInput(attrs={'class': 'form-control', 'placeholder': 'Enter the maximum number of records'}),
             'debug_mode': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
     
@@ -163,10 +133,102 @@ class TaskForm(forms.ModelForm):
         # Filter users based on company type
 
 
+class TaskEditForm(forms.ModelForm):
+    
+    job = forms.ModelChoiceField(
+        queryset=Job.objects.all(),
+        required=False,
+        label='Job',
+        help_text='Select the job.',
+        widget=forms.Select(attrs={'class': 'form-select form-select-lg'})
+    )
+
+    class Meta:
+        model = Task
+        fields = ['log_path', 'job', 'debug_mode', 'step']
+        widgets = {
+            'log_path': forms.TextInput(attrs={'class': 'form-control'}),
+            'debug_mode': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'step': forms.NumberInput(attrs={'class': 'form-control'}),
+        }
+
+    
+
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop('user', None)  # Pass the user object to the form
+        
+        if user is None:
+            raise ValueError("User must not be None")
+        
+        super(TaskEditForm, self).__init__(*args, **kwargs)
+
+        # Edit Permissions
+        if not user.is_staff:
+            self.fields['log_path'].widget.attrs['readonly'] = 'readonly'
+            self.fields['debug_mode'].widget.attrs['readonly'] = 'readonly'
+            self.fields['job'].widget.attrs['readonly'] = 'readonly'
+    
+    def clean(self):
+        cleaned_data = super().clean() 
+
+        if self.instance.status in [Task.Status.STARTING, Task.Status.RUNNING]:
+            if self.instance.debug_mode != cleaned_data.get('debug_mode'):
+                self.add_error('debug_mode', "Cannot change debug_mode if current status is STARTING or RUNNING. Please change it to STOPPED first.")
+            
+            job = cleaned_data.get('job')
+            if job and self.instance.job_id != job.id: # use get to avoid keyerrors
+                self.add_error('job', "Cannot change job if current status is STARTING or RUNNING. Please change it to STOPPED first.")
+            if self.instance.step != cleaned_data.get('step'):
+                self.add_error('step', "Cannot change step if current status is STARTING or RUNNING. Please change it to STOPPED first.")
+            if self.instance.log_path != cleaned_data.get('log_path'):
+                self.add_error('log_path', "Cannot change log_path if current status is STARTING or RUNNING. Please change it to STOPPED first.")
+
+        return cleaned_data
+    
+    def save(self, commit=True):
+        # Check if type has changed
+        old_instance = Task.objects.get(pk=self.instance.pk)
+
+        instance = super(TaskEditForm, self).save(commit=False)
+        
+        # Check if the status is STARTING or RUNNING
+        if old_instance.status in [Task.Status.STARTING, Task.Status.RUNNING]:
+            
+            if old_instance.debug_mode != self.cleaned_data['debug_mode']:
+                self.add_error('debug_mode', "Cannot change debug_mode if status is STARTING or RUNNING.")
+            
+            if old_instance.job_id != self.cleaned_data['job']:
+                self.add_error('job', "Cannot change job if status is STARTING or RUNNING.")
+            
+            if old_instance.step != self.cleaned_data['step']:
+                self.add_error('step', "Cannot change step if status is STARTING or RUNNING.")
+            
+            if old_instance.log_path != self.cleaned_data['log_path']:
+                self.add_error('log_path', "Cannot change log_path if status is STARTING or RUNNING.")
+            
+            # Abort save if there are errors
+            if self.errors:
+                return old_instance
+            
+        # Commit the changes
+        if commit:
+            instance.save()
+        
+        # Change the status if it has changed, to reflect the new status
+        if self.instance.status != old_instance.status:
+            self.instance.change_status(self.instance.status)
+            
+        return instance
+
+
+
+
 class JobForm(forms.ModelForm):
     
     starting_condition_type = forms.ModelChoiceField(
-        queryset=ContentType.objects.all().exclude(model__in=['maxrecordscondition']),
+        queryset=ContentType.objects.filter(
+            Q(app_label='task_app', model='timecondition')
+        ),
         required=False,
         label='Starting Condition Type',
         help_text='Select the type of condition for starting.',
@@ -174,7 +236,9 @@ class JobForm(forms.ModelForm):
     )
     
     stopping_condition_type = forms.ModelChoiceField(
-        queryset=ContentType.objects.all(),
+        queryset = ContentType.objects.filter(
+            Q(app_label='task_app', model='timecondition')
+        ),
         required=False,
         label='Stopping Condition Type',
         help_text='Select the type of condition for stopping.',
@@ -185,12 +249,12 @@ class JobForm(forms.ModelForm):
 
     class Meta:
         model = Job
-        fields = ['name', 'type', 'debug_mode', 'starting_condition_type', 'stopping_condition_type']
+        fields = ['name', 'type',  'starting_condition_type', 'stopping_condition_type','continue_mode']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Enter the name of the job'}),
             'type': forms.Select(attrs={'class': 'form-select form-select-lg'}),
             'parent_task': forms.Select(attrs={'class': 'form-select form-select-lg'}),
-            'debug_mode': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'continue_mode': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
         
 
@@ -201,63 +265,28 @@ class JobForm(forms.ModelForm):
         # Adjust this if you want to filter specific content types for conditions.
 
         self.fields['starting_condition_type'].queryset = ContentType.objects.filter(
-            Q(app_label='etl_app', model='timecondition')
+            Q(app_label='task_app', model='timecondition')
         )
         self.fields['stopping_condition_type'].queryset = ContentType.objects.filter(
-            Q(app_label='etl_app', model='timecondition') | Q(app_label='etl_app', model='maxrecordscondition')
+            Q(app_label='task_app', model='timecondition') 
         )
     
-    def save(self,starting_condition_form = None,stopping_condition_form = None, *args, **kwargs):
+    def save(self,starting_condition_form = None,stopping_condition_form = None, created_by = None, *args, **kwargs):
         
         
         # Create or update the Job instance
         job = super().save(commit=False)
+        
+        job.created_by = created_by
         
         
         if starting_condition_form:
             job.starting_condition = starting_condition_form.save()
             
         if stopping_condition_form:
-            job.stopping_condition = stopping_condition_form.save()  
+            job.stopping_condition = stopping_condition_form.save()
         
-        
-
         # Call the original save method
         job.save()
     
-        
         return job
-
-
-    def clean(self):
-        cleaned_data = super().clean()
-        task_type = cleaned_data.get('type')
-        
-        if task_type == Task.TaskType.TRANSFORM:
-            cleaned_data['parent_task'] = cleaned_data.get('parent_task_extract')
-            
-        elif task_type == Task.TaskType.LOAD:
-            cleaned_data['parent_task'] = cleaned_data.get('parent_task_transform')
-            
-            
-        if task_type == Task.TaskType.TRANSFORM:
-            cleaned_data['parent_job'] = cleaned_data.get('parent_job_extract')
-            
-            if cleaned_data['parent_job'] and cleaned_data['parent_task']:
-                self.add_error('parent_task_extract', 'Parent job and parent task cannot be selected at the same time.')
-                self.add_error('parent_job_extract', 'Parent job and parent task cannot be selected at the same time.')
-            elif not cleaned_data['parent_job'] and not cleaned_data['parent_task']:
-                self.add_error('parent_job_extract', 'Parent job and parent task cannot be empty at the same time.')
-                self.add_error('parent_task_extract', 'Parent job and parent task cannot be empty at the same time.')
-            
-        elif task_type == Task.TaskType.LOAD:
-            cleaned_data['parent_job'] = cleaned_data.get('parent_job_transform')
-            
-            if cleaned_data['parent_job'] and cleaned_data['parent_task']:
-                self.add_error('parent_task_transform', 'Parent job and parent task cannot be selected at the same time.')
-                self.add_error('parent_job_transform', 'Parent job and parent task cannot be selected at the same time.')
-            elif not cleaned_data['parent_job'] and not cleaned_data['parent_task']:
-                self.add_error('parent_job_transform', 'Parent job and parent task cannot be empty at the same time.')
-                self.add_error('parent_job_transform', 'Parent job and parent task cannot be empty at the same time.')
-            
-        return cleaned_data

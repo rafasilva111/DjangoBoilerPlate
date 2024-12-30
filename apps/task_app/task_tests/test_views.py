@@ -11,7 +11,7 @@
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
-
+from django.test import RequestFactory
 ##
 #   Extras
 #
@@ -30,7 +30,7 @@ import inspect
 
 from apps.user_app.models import User
 from apps.task_app.models import Task
-
+from apps.common.tests.test_views import BaseTestCase
 
 
 ##
@@ -54,51 +54,94 @@ from apps.common.tests.functions import print_prologue
 #   Contants
 #
 
-
+from apps.common.tests.constants import TESTING_ACCOUNT_A, TESTING_ACCOUNT_A_PASSWORD, TESTING_ACCOUNT_B, TESTING_ACCOUNT_B_PASSWORD, TESTING_ACCOUNT_C, TESTING_ACCOUNT_C_PASSWORD
 
 
 
 ###
 #
-#       Login Views 
+#       Task Views 
 #   
 ##
 
-USER_EMAIL = "test@example.com"
-USER_PASSWORD = "securepassword"
+from apps.task_app.views import TaskTableView
 
-
-class TaskTableViewTest(TestCase):
+class TaskTableViewTestCase(BaseTestCase):
     def setUp(self):
         """Set up a user for testing."""
 
-        self.user = User.objects.create_user(
-            email=USER_EMAIL,
-            password=USER_PASSWORD,
-            birth_date=timezone.now(),  
-        )
+        super().setUp()
+        self.factory = RequestFactory()
+        self.request = self.factory.get("/customer/details")
         
-        self.url = reverse('task')
-        self.login_url = reverse('login')  # Assuming the URL name for login is 'login'
-        self.logout_url = reverse('logout')  # Assuming the URL name for logout is 'logout'
+        self.normal_user = User.objects.get(email=f"{TESTING_ACCOUNT_C}@{TESTING_ACCOUNT_C}.pt")
+        self.staff_user = User.objects.get(email=f"{TESTING_ACCOUNT_B}@{TESTING_ACCOUNT_B}.pt")
+        self.super_user = User.objects.get(email=f"{TESTING_ACCOUNT_A}@{TESTING_ACCOUNT_A}.pt")
         
-        # Log in the user and check if login was successful
-        login_success = self.client.login(email=USER_EMAIL, password=USER_PASSWORD)
-        self.assertTrue(login_success, "Login should be successful")
+        
 
-        # Check if the user is authenticated
-        response = self.client.get(self.login_url)  # Fetching the login page to check authentication
-        self.assertTrue(response.wsgi_request.user.is_authenticated, "User should be authenticated")
+        
 
     ##
-    #   Testing View load
+    #   Testing View permissions
     #
     
-    def test_view_load_succeds_when_user_authenticated(self):
-        """Test that the login page loads and returns a 200 status when User authenticated."""
+    def test_view_permissions_for_normal_user(self):
+        """Test that a normal user can view tasks but cannot create, edit, or delete tasks."""
         
         print_prologue()
         
+        self.request.user = self.normal_user
+        
+        response = TaskTableView.as_view()(self.request)
+            
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'task_app/task/table.html')
+        self.assertFalse(response.context['can_create_task'])
+        self.assertFalse(response.context['can_edit_task'])
+        self.assertTrue(response.context['can_view_task'])
+        self.assertFalse(response.context['can_delete_task'])
+        
+        print("\n")
+
+    def test_view_permissions_for_staff_user(self):
+        """Test that a staff user can view, edit, and pause tasks but cannot create or delete tasks."""
+        
+        print_prologue()
+            
+        login_success = self.client_staff_user.login(email=f"{TESTING_ACCOUNT_B}@{TESTING_ACCOUNT_B}.pt", password=TESTING_ACCOUNT_B_PASSWORD)
+        self.assertTrue(login_success, "Login should be successful")
+        
+        response = self.client_staff_user.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'task_app/task/table.html')
+        self.assertFalse(response.context['can_create_task'])
+        self.assertFalse(response.context['can_edit_task'])
+        self.assertTrue(response.context['can_view_task'])
+        self.assertFalse(response.context['can_delete_task'])
+        
+        print("\n")
+
+    def test_view_permissions_for_super_user(self):
+        """Test that a superuser can view, create, edit, and delete tasks."""
+        
+        print_prologue()
+        
+        if self.client:
+            self.client.logout()
+            
+        login_success = self.client.login(email=f"{TESTING_ACCOUNT_A}@{TESTING_ACCOUNT_A}.pt", password=TESTING_ACCOUNT_A_PASSWORD)
+        self.assertTrue(login_success, "Login should be successful")
+        
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'task_app/task/table.html')
+        self.assertTrue(response.context['can_create_task'])
+        self.assertTrue(response.context['can_edit_task'])
+        self.assertTrue(response.context['can_view_task'])
+        self.assertTrue(response.context['can_delete_task'])
+        
+        print("\n")
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'task_app/task/table.html')
@@ -112,7 +155,8 @@ class TaskTableViewTest(TestCase):
         
         self.client.logout()
         response = self.client.get(self.url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.url}", status_code=302, target_status_code=200)
+
+        self.assertRedirects(response, f"{reverse('login')}?next={self.url}", status_code=302, target_status_code=200)
         
         print("\n")
         
@@ -131,7 +175,7 @@ class TaskTableViewTest(TestCase):
         for i in range(25):
             Task.objects.create(type = Task.TaskType.EMPTY)          
         
-        response = self.client.get(self.url, {'page': 2, 'page_size': 5})
+        response = self.client_normal_user.get(self.url, {'page': 2, 'page_size': 5})
         self.assertEqual(response.status_code, 200)
         # Check that the response contains only the users for page 2
         self.assertEqual(len(response.context['page_obj']), 5)
@@ -139,88 +183,3 @@ class TaskTableViewTest(TestCase):
         print("\n")
         
 
-class TaskCreateViewTest(TestCase):
-    def setUp(self):
-        """Set up a user for testing."""
-
-        self.user = User.objects.create_user(
-            email=USER_EMAIL,
-            password=USER_PASSWORD,
-            birth_date=timezone.now(),  
-        )
-        
-        self.url = reverse('task')
-        self.login_url = reverse('login')  # Assuming the URL name for login is 'login'
-        self.logout_url = reverse('logout')  # Assuming the URL name for logout is 'logout'
-        
-        # Log in the user and check if login was successful
-        login_success = self.client.login(email=USER_EMAIL, password=USER_PASSWORD)
-        self.assertTrue(login_success, "Login should be successful")
-
-        # Check if the user is authenticated
-        response = self.client.get(self.login_url)  # Fetching the login page to check authentication
-        self.assertTrue(response.wsgi_request.user.is_authenticated, "User should be authenticated")
-
-    ##
-    #   Testing View load
-    #
-    
-    def test_view_load_succeds_when_user_authenticated(self):
-        """Test that the login page loads and returns a 200 status when User authenticated."""
-        
-        print_prologue()
-        
-        response = self.client.get(self.url)
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'task_app/task/table.html')
-        
-        print("\n")
-        
-    def test_view_load_fails_when_user_unauthenticated(self):
-        """Test that the login page redirects to login view if not logged in."""
-        
-        print_prologue()
-        
-        self.client.logout()
-        response = self.client.get(self.url)
-        self.assertRedirects(response, f"{self.login_url}?next={self.url}", status_code=302, target_status_code=200)
-        
-        print("\n")
-    
-    
-    ##
-    #   Testing View form
-    #
-    def test_create_task(self):
-        """Test that the creation of a Task."""
-        
-        print_prologue()
-        
-        # Define the data to be submitted in the form
-        form_data = {
-            'type': Task.TaskType.EMPTY,       # or any other valid type value
-            'debug_mode': False    # The checkbox can be True or False
-        }
-        
-        # Perform a POST request to the view handling task creation
-        response = self.client.post(reverse('task_create'), data=form_data)
-                
-        # Verify that the task was created in the database
-        task = Task.objects.get(type=Task.TaskType.EMPTY)
-        
-        # Check the task fields
-        self.assertEqual(task.type, form_data['type'])
-        self.assertEqual(task.debug_mode, form_data['debug_mode'])
-        
-        # Check if the response redirects (assuming successful form submission redirects)
-        self.assertRedirects(
-            response, 
-            reverse('task_detail', args=[task.id]),  # URL with task ID as argument
-            status_code=302,
-            target_status_code=200
-        )
-        
-        print("\n")
-        
-        
-        

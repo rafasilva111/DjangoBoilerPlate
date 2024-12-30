@@ -103,3 +103,6 @@ django-celery-beat
 django_extensions
 drf_yasg
 channels_redis
+sphinx
+sphinx-autoapi
+sphinx_rtd_theme

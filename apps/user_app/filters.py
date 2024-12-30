@@ -31,11 +31,6 @@ class UserFilter(FilterSet):
         widget=forms.Select(attrs={'class': 'form-select form-select-sm'})
     )
     
-    type = ChoiceFilter( 
-        choices=User.UserType.choices,
-        label='Type:',
-        widget=forms.Select(attrs={'class': 'form-select form-select-sm'})
-    )
 
     is_active = ChoiceFilter(
         field_name='is_active',

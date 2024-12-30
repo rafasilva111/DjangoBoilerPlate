@@ -8,7 +8,7 @@ from django.contrib import admin
 ### App-specific imports
 
 ## Models
-from apps.task_app.models import Task, Job
+from apps.task_app.models import Task, Job, TimeCondition  # Add this import
 
 # Register your models here.
 
@@ -57,20 +57,34 @@ class JobAdmin(admin.ModelAdmin):
         list_filter (tuple): Fields to filter by in the list view.
         readonly_fields (tuple): Fields to set as read-only.
     """
-    list_display = ('last_run',)
-    list_filter = ('last_run',)
-    readonly_fields = ('last_run',)
+    list_display = ('name', 'type', 'enabled', 'continue_mode', 'starting_condition', 'stopping_condition', 'log_path')
+    search_fields = ('name', 'type','enabled')
+    list_filter = ('continue_mode', 'type')
+    readonly_fields = ('starting_condition', 'stopping_condition')
+    fieldsets = (
+        (None, {
+            'fields': ('name', 'type', 'continue_mode', 'log_path')
+        }),
+        ('Conditions', {
+            'fields': ('starting_condition', 'stopping_condition')
+        }),
+    )
 
-    def save_model(self, request, obj, form, change):
-        """
-        Custom save logic for Job instances.
 
-        - Saves the Job instance and performs additional handling if required.
 
-        Args:
-            request (HttpRequest): The current request object.
-            obj (Job): The Job instance to be saved.
-            form (ModelForm): The form used to change the object.
-            change (bool): A flag indicating if the object is being changed.
-        """
-        obj.save()
+@admin.register(TimeCondition)
+class TimeConditionAdmin(admin.ModelAdmin):
+    """
+    Admin configuration for the TimeCondition model.
+
+    - Displays crontab and periodic task information.
+    - Allows searching by crontab schedule.
+
+    Attributes:
+        list_display (tuple): Fields to display in the list view.
+        search_fields (tuple): Fields to search by in the list view.
+    """
+    list_display = ('id', 'crontab', 'periodic_task')
+    search_fields = ('crontab__minute', 'crontab__hour', 'crontab__day_of_week', 'crontab__day_of_month', 'crontab__month_of_year')
+
+

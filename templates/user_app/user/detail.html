@@ -35,12 +35,17 @@
                 <a href="{% url 'user_edit' record.id %}" class="btn btn-primary py-1">
                     Edit
                 </a>
-                <a href="{% url 'user_enable_disable' record.id %}?next={{ request.path }}" class="btn btn-primary py-1">
-                    Disable
+                <a href="{% url 'user_enable_disable' record.id %}?next={{ request.path }}" class="btn btn-warning py-1">
+                    {% if record.is_active %}
+                        Disable
+                    {% else %}
+                        Enable
+                    {% endif %}
                 </a>
                 <a href="{% url 'user_delete' record.id %}" class="btn btn-danger py-1">
                     Delete
                 </a>
+                
             </div>
         </div>
         <div class="card-body task-details">
@@ -57,49 +62,12 @@
                     <p class="badge bg-label-primary me-1">{{ record.email }}</p>
                 </div>
 
-                <!-- Age -->
-                <div class="col-md-2">
-                    <h6>Age:</h6>
-                    <p class="badge bg-label-primary me-1">{{ record.age }}</p>
-                </div>
-
-                <!-- Sex -->
-                <div class="col-md-2">
-                    <h6>Sex:</h6>
-                    <p class="badge bg-label-primary me-1">
-                        {% if record.sex == 'M' %}
-                            Male
-                        {% elif record.sex == 'F' %}
-                            Female
-                        {% else %}
-                            Not Specified
-                        {% endif %}
-                    </p>
-                </div>
-                
-                <!-- Company -->
-                <div class="col-md-3">
-                    <h6>Company:</h6>
-                    <p class="badge bg-label-primary me-1">
-                        {% if record.company %}
-                            {{ record.company.name }}
-                        {% else %}
-                            None
-                        {% endif %}
-                    </p>
-                </div>
 
                 <!-- User Type -->
                 <div class="col-md-2">
                     <h6>User Type:</h6>
                     <p class="badge bg-label-primary me-1">
-                        {% if record.user_type == 'N' %}
-                            Normal
-                        {% elif record.user_type == 'C' %}
-                            Company
-                        {% elif record.user_type == 'A' %}
-                            Admin
-                        {% endif %}
+                        {{ record.type }}
                     </p>
                 </div>
 
@@ -112,21 +80,12 @@
                     {% else %}
                         bg-label-danger
                     {% endif %}
-                    me-1">{{ record.is_active}}</span>
-                </div>
-
-                <!-- Is Staff -->
-                <div class="col-md-2">
-                    <h6>Staff:</h6>
-                    <span class="badge 
-                        {% if user.is_staff %}
-                            bg-label-danger
-                        {% else %}
-                            bg-label-success
-                        {% endif %} me-1">
-                        {{ record.is_staff }}
+                    me-1">
+                    {{ record.is_active }}
                     </span>
                 </div>
+
+
             </div>
 
             <!-- Creation & Update Date -->

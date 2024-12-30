@@ -48,21 +48,6 @@
             </div>
           </div>
 
-          <!-- Birth Date field -->
-          <div class="form-group">
-            {{ form.birth_date.label_tag }}
-            <div class="col-md-12 mt-2 mb-3">
-              {{ form.birth_date }}
-              {% if form.birth_date.errors %}
-              <div class="invalid-feedback d-block">
-                {% for error in form.birth_date.errors %}
-                {{ error }}
-                {% endfor %}
-              </div>
-              {% endif %}
-            </div>
-          </div>
-
           <!-- Sex field -->
           <div class="form-group">
             {{ form.sex.label_tag }}
@@ -78,29 +63,14 @@
             </div>
           </div>
 
-          <!-- Company field -->
-          <div class="form-group">
-            {{ form.company.label_tag }}
-            <div class="col-md-12 mt-2 mb-3">
-              {{ form.company }}
-              {% if form.company.errors %}
-              <div class="invalid-feedback d-block">
-                {% for error in form.company.errors %}
-                {{ error }}
-                {% endfor %}
-              </div>
-              {% endif %}
-            </div>
-          </div>
-
           <!-- User Type field -->
           <div class="form-group">
-            {{ form.user_type.label_tag }}
+            {{ form.type.label_tag }}
             <div class="col-md-12 mt-2 mb-3">
-              {{ form.user_type }}
-              {% if form.user_type.errors %}
+              {{ form.type }}
+              {% if form.type.errors %}
               <div class="invalid-feedback d-block">
-                {% for error in form.user_type.errors %}
+                {% for error in form.type.errors %}
                 {{ error }}
                 {% endfor %}
               </div>
