@@ -26,7 +26,7 @@ main_logger = logging.getLogger('django')
 ##
 
 @app.task
-def _launch_job(job_id):
+def _launch_job_task(job_id):
     """
     Initializes a job, creating or resuming associated tasks as needed.
 

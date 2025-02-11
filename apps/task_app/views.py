@@ -57,7 +57,7 @@ from apps.task_app.models import Job, Task
 #   Forms
 #
 
-from apps.task_app.forms import  TaskForm, JobForm, TimeConditionForm, TaskEditForm
+from apps.task_app.forms import  TaskForm, JobForm, TimeConditionForm, TaskEditForm, JobEditForm
 
 
 ##
@@ -318,7 +318,8 @@ class JobCreateView(PermissionRequiredMixin, TemplateView):
             HttpResponseRedirect: Redirects to job detail view on success.
             HttpResponse: Re-renders form with errors on failure.
         """
-        job_form = JobForm(request.POST)
+        job = self.get_object()
+        job_form = JobForm(request.POST, instance=job)
         starting_time_condition_form = TimeConditionForm(
             request.POST, prefix="starting_condition_time_form"
         )
@@ -377,6 +378,175 @@ class JobCreateView(PermissionRequiredMixin, TemplateView):
             }
         )        
         return self.render_to_response(context)
+
+@method_decorator(login_required, name='dispatch')
+class JobEditView(PermissionRequiredMixin, TemplateView):
+    """
+    View for editing a user.
+
+    Inherits from:
+        PermissionRequiredMixin: Ensures the user has the required permissions.
+        TemplateView: Renders a template.
+
+    Attributes:
+        template_name (str): The path to the template used for rendering the view.
+        permission_required (str): The permission required to access this view.
+        form_class (UserEditForm): The form class used for editing the user.
+
+    Methods:
+        get_object(): Retrieves the User object or raises a 404 error.
+        get_context_data(**kwargs): Adds the UserEditForm to the context.
+        post(request, *args, **kwargs): Handles form submission for editing a user.
+
+
+        Returns:
+            User: The user object retrieved by ID.
+
+
+        Args:
+            **kwargs: Additional context data.
+
+        Returns:
+            dict: The context data including the form.
+
+
+        Args:
+            request (HttpRequest): The HTTP request object.
+            *args: Additional positional arguments.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            HttpResponse: The HTTP response object.
+    """
+    template_name = 'task_app/job/edit.html'
+    permission_required = 'auth.change_job'
+    form_class = JobEditForm
+
+    def get_object(self):
+        """
+        Retrieve the User object or raise a 404 error.
+        """
+        instance_id = self.kwargs.get('id')
+        return get_object_or_404(Job, id=instance_id)
+
+    
+    def get_context_data(self, **kwargs):
+        """
+        Prepares and returns the context data for template rendering.
+        - Initializes template layout.
+        - Adds job form and time condition forms to context.
+
+        Returns:
+            dict: Context dictionary containing:
+                - form: JobForm instance.
+                - starting_condition_time_form: TimeConditionForm instance for starting condition.
+                - stopping_condition_time_form: TimeConditionForm instance for stopping condition.
+        """
+        context = TemplateLayout.init(self, super().get_context_data(**kwargs))
+        instance = self.get_object()
+        context["form"] = self.form_class(instance=instance)
+        
+        if instance.starting_condition_type:
+            if instance.starting_condition_type.name == "time condition":
+                context["starting_condition_time_form"] = TimeConditionForm(
+                    prefix="starting_condition_time_form",
+                    instance=instance.starting_condition
+                )
+        
+        if instance.stopping_condition_type:
+            if instance.stopping_condition_type.name == "time condition":
+                print("Stopping condition instance:", instance.stopping_condition)
+                context["stopping_condition_time_form"] = TimeConditionForm(
+                prefix="stopping_condition_time_form",
+                instance=instance.stopping_condition
+            )
+
+        return context
+
+    def post(self, request, *args, **kwargs):
+        """
+        Handles form submission for creating a new job.
+        - Validates and saves the job form and time condition forms.
+        - Redirects to job detail view on success, or re-renders form with errors.
+
+        Args:
+            request (HttpRequest): The HTTP request object.
+
+        Returns:
+            HttpResponseRedirect: Redirects to job detail view on success.
+            HttpResponse: Re-renders form with errors on failure.
+        """
+        job_form = self.form_class(request.POST, instance=self.get_object())
+        
+        if job_form.is_valid():
+            starting_condition_form = None
+            stopping_condition_form = None
+
+            # Save the starting condition
+            if job_form.instance.starting_condition_type:
+                
+                if job_form.instance.starting_condition_type.name == "time condition":
+                    
+                    starting_time_condition_form = TimeConditionForm(
+                        request.POST, prefix="starting_condition_time_form", instance = job_form.instance.starting_condition
+                    )
+                    
+                    if starting_time_condition_form.is_valid():
+                        starting_condition_form = starting_time_condition_form
+                        
+                        
+                    
+                    else:
+                        # Collect all errors if any form is invalid
+                        context = self.get_context_data()
+                        context.update(
+                            {
+                                "form": job_form,
+                                "starting_condition_time_form": starting_time_condition_form,
+                            }
+                        ) 
+                        return self.render_to_response(context)
+                    
+
+            # Save the stopping time condition
+            if job_form.instance.stopping_condition_type:
+                
+                if job_form.instance.stopping_condition_type.name == "time condition":
+                    
+                    stopping_time_condition_form = TimeConditionForm(
+                        request.POST, prefix="stopping_condition_time_form", instance = job_form.instance.stopping_condition
+                    )
+                    
+                    if stopping_time_condition_form.is_valid():
+                        stopping_condition_form = stopping_time_condition_form
+                        
+                    else:
+                        # Collect all errors if any form is invalid
+                        context = self.get_context_data()
+                        context.update(
+                            {
+                                "form": job_form,
+                                "stopping_condition_time_form": stopping_time_condition_form,
+                            }
+                        ) 
+                        return self.render_to_response(context)
+                        
+            job_form.save(starting_condition_form = starting_condition_form, stopping_condition_form = stopping_condition_form)
+            
+            return redirect(reverse("job_detail", args=[job_form.instance.id]))
+        
+        # Create context
+        context = self.get_context_data()
+        context.update(
+            {
+                "form": job_form,
+                "starting_condition_time_form": starting_time_condition_form,
+                "stopping_condition_time_form": stopping_time_condition_form,
+            }
+        )        
+        return self.render_to_response(context)
+
+
 
 ###
 #

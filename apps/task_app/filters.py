@@ -40,7 +40,7 @@ class TaskFilter(FilterSet):
 
 class JobFilter(FilterSet):
     type = ChoiceFilter( choices=Task.TaskType.choices,label='Type', widget=forms.Select(attrs={'class': 'form-select form-select-sm'}))
-    created_by = ModelChoiceFilter(queryset=User.objects.all(), label='Created By', widget=forms.Select(attrs={'class': 'form-select form-select-sm'}))
+    created_by = ModelChoiceFilter(queryset=User.objects.filter(is_superuser=True), label='Created By', widget=forms.Select(attrs={'class': 'form-select form-select-sm'}))
 
     class Meta:
         model = Job

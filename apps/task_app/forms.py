@@ -87,7 +87,18 @@ class TimeConditionForm(forms.ModelForm):
     class Meta:
         model = TimeCondition
         fields = ['minute', 'hour', 'day_of_week', 'day_of_month', 'month_of_year']
-        
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Map instance crontab fields to form fields
+        if self.instance and hasattr(self.instance, 'crontab') and self.instance.crontab:
+            self.fields['minute'].initial = self.instance.crontab.minute
+            self.fields['hour'].initial = self.instance.crontab.hour
+            self.fields['day_of_week'].initial = self.instance.crontab.day_of_week
+            self.fields['day_of_month'].initial = self.instance.crontab.day_of_month
+            self.fields['month_of_year'].initial = self.instance.crontab.month_of_year
+        # Filter users based on company type
+
     def clean(self):
         cleaned_data = super().clean()
         minute = cleaned_data.get('minute')
@@ -98,7 +109,7 @@ class TimeConditionForm(forms.ModelForm):
         return cleaned_data
     
         
-    def save(self, commit=True):
+    def save(self,  *args, **kwargs):
         instance = super().save(commit=False)
 
         # Create or get the crontab schedule
@@ -110,12 +121,8 @@ class TimeConditionForm(forms.ModelForm):
             month_of_year=self.cleaned_data['month_of_year'],
         )
         
-
-
         instance.crontab = crontab
-
-        if commit:
-            instance.save()
+        instance.save()
         return instance
 
 
@@ -185,7 +192,7 @@ class TaskEditForm(forms.ModelForm):
 
         return cleaned_data
     
-    def save(self, commit=True):
+    def save(self,  *args, **kwargs):
         # Check if type has changed
         old_instance = Task.objects.get(pk=self.instance.pk)
 
@@ -210,9 +217,7 @@ class TaskEditForm(forms.ModelForm):
             if self.errors:
                 return old_instance
             
-        # Commit the changes
-        if commit:
-            instance.save()
+        instance.save()
         
         # Change the status if it has changed, to reflect the new status
         if self.instance.status != old_instance.status:
@@ -278,6 +283,58 @@ class JobForm(forms.ModelForm):
         job = super().save(commit=False)
         
         job.created_by = created_by
+        
+        
+        if starting_condition_form:
+            job.starting_condition = starting_condition_form.save()
+            
+        if stopping_condition_form:
+            job.stopping_condition = stopping_condition_form.save()
+        
+        # Call the original save method
+        job.save()
+    
+        return job
+    
+    
+class JobEditForm(forms.ModelForm):
+    
+    starting_condition_type = forms.ModelChoiceField(
+        queryset=ContentType.objects.filter(
+            Q(app_label='task_app', model='timecondition')
+        ),
+        required=False,
+        label='Starting Condition Type',
+        help_text='Select the type of condition for starting.',
+        widget=forms.Select(attrs={'class': 'form-select form-select-lg'})
+    )
+    
+    stopping_condition_type = forms.ModelChoiceField(
+        queryset = ContentType.objects.filter(
+            Q(app_label='task_app', model='timecondition')
+        ),
+        required=False,
+        label='Stopping Condition Type',
+        help_text='Select the type of condition for stopping.',
+        widget=forms.Select(attrs={'class': 'form-select form-select-lg'})
+    )
+
+    class Meta:
+        model = Job
+        fields = ['name', 'type',  'starting_condition_type', 'stopping_condition_type','continue_mode']
+        widgets = {
+            'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Enter the name of the job'}),
+            'type': forms.Select(attrs={'class': 'form-select form-select-lg'}),
+            'parent_task': forms.Select(attrs={'class': 'form-select form-select-lg'}),
+            'continue_mode': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        }           
+    
+
+    def save(self, starting_condition_form = None,stopping_condition_form = None, *args, **kwargs):
+        
+        
+        # Create or update the Job instance
+        job = super().save(commit=False)
         
         
         if starting_condition_form:

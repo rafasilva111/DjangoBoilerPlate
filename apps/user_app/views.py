@@ -386,6 +386,7 @@ class PasswordResetCompleteView(TemplateView):
 #   
 ##
 
+@method_decorator(login_required, name='dispatch')
 class UserTableView(LoginRequiredMixin, TemplateView):
     """
     A view class that displays a paginated table of users with filtering capabilities.
@@ -469,7 +470,8 @@ class UserTableView(LoginRequiredMixin, TemplateView):
         )
         
         return context
-
+    
+@method_decorator(login_required, name='dispatch')
 class UserDetailView(PermissionRequiredMixin, TemplateView):
     """
     View to display the details of a user.
@@ -494,7 +496,7 @@ class UserDetailView(PermissionRequiredMixin, TemplateView):
     
 
 
-
+@method_decorator(login_required, name='dispatch')
 class UserEditView(PermissionRequiredMixin, TemplateView):
     """
     View for editing a user.
@@ -549,8 +551,7 @@ class UserEditView(PermissionRequiredMixin, TemplateView):
         Add the UserEditForm to the context.
         """
         context = TemplateLayout.init(self, super().get_context_data(**kwargs))
-        user = self.get_object()
-        context['form'] = self.form_class(instance=user, user=self.request.user)
+        context['form'] = self.form_class(instance=self.get_object(), user=self.request.user)
         return context
 
     def post(self, request, *args, **kwargs):

@@ -74,7 +74,8 @@ class TimeCondition(Condition):
     Condition based on a time schedule, using `CrontabSchedule` for scheduling.
 
     Attributes:
-        crontab (ForeignKey): Foreign key to a `CrontabSchedule` instance.
+        crontab (models.ForeignKey): Foreign key to a `CrontabSchedule` instance.
+        periodic_task (models.OneToOneField): One-to-one relationship with a `PeriodicTask` instance, can be null or blank.
     """
     crontab = models.ForeignKey(
         CrontabSchedule,
@@ -85,6 +86,18 @@ class TimeCondition(Condition):
     def __str__(self):
         return f"{self.id} - Crontab: {self.crontab}"
 
+
+class ThresholdCondition(Condition):
+    """
+    Condition based on a threshold value.
+
+    Attributes:
+        threshold_value (int): The threshold value for the condition.
+    """
+    threshold_value = models.IntegerField()
+    
+    def __str__(self):
+        return f"{self.id} - Threshold Value: {self.threshold_value}"
 
 
 class Job(BaseTask):
@@ -151,29 +164,44 @@ class Job(BaseTask):
         
         # When Starting condition is a TimeCondition
         if self.starting_condition and isinstance(self.starting_condition, TimeCondition):
-            if not self.starting_condition.periodic_task:
-                self.starting_condition.periodic_task = PeriodicTask.objects.create(
-                    crontab=self.starting_condition.crontab,
-                    name=f"Job Starting Condition: {self.name}",
-                    task='apps.task_app.tasks._launch_job',
-                    args=json.dumps([self.id]),
-                    enabled=self.enabled,
-                )
-                self.starting_condition.save()
+            
+            self.starting_condition.periodic_task, created = PeriodicTask.objects.get_or_create(
+                name=f"Job Starting Condition: {self.name}",
+                defaults={
+                    'crontab': self.starting_condition.crontab,
+                    'task': 'apps.task_app.tasks._launch_job_task',
+                    'args': json.dumps([self.id]),
+                    'enabled': self.enabled,
+                }
+            )
+                
+            if not created:
+                self.starting_condition.periodic_task.crontab = self.starting_condition.crontab
+                self.starting_condition.periodic_task.enabled = self.enabled
+                self.starting_condition.periodic_task.save()
+                
+            self.starting_condition.save()
         
         # Create/Update Stopping condition
         
         # When Stopping condition is a TimeCondition
         if self.stopping_condition and isinstance(self.stopping_condition, TimeCondition):
-            if not self.stopping_condition.periodic_task:
-                self.stopping_condition.periodic_task = PeriodicTask.objects.create(
-                    crontab=self.stopping_condition.crontab,
-                    name=f"Job Stopping Condition: {self.name}",
-                    task='apps.task_app.tasks._stop_job_task',
-                    args=json.dumps([self.id]),
-                    enabled=self.enabled,
-                )
-                
+            
+            self.stopping_condition.periodic_task, created = PeriodicTask.objects.get_or_create(
+                name=f"Job Stopping Condition: {self.name}",
+                defaults={
+                    'crontab': self.stopping_condition.crontab,
+                    'task': 'apps.task_app.tasks._stop_job_task',
+                    'args': json.dumps([self.id]),
+                    'enabled': self.enabled,
+                }
+            )
+            
+            if not created:
+                self.stopping_condition.periodic_task.crontab = self.stopping_condition.crontab
+                self.stopping_condition.periodic_task.enabled = self.enabled
+                self.stopping_condition.periodic_task.save()         
+                      
             self.stopping_condition.save()
 
         super().save(*args, **kwargs)

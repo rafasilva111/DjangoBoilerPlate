@@ -70,14 +70,12 @@
 
           <td>
             <div class="dropdown">
-              <button type="button" class="btn p-0 dropdown-toggle hide-arrow" data-bs-toggle="dropdown"><i
-                  class="bx bx-dots-vertical-rounded"></i></button>
+              <button type="button" class="btn p-0 dropdown-toggle hide-arrow" data-bs-toggle="dropdown">
+                <i class="bx bx-dots-vertical-rounded"></i></button>
               <div class="dropdown-menu">
-                <a class="dropdown-item" href="{% url 'job_detail' record.id %}"><i class="bx bx-detail me-1"></i>
-                  Details</a>
-                <a class="dropdown-item" href=""><i class="bx bx-pencil me-1"></i> Edit</a>
-                <a class="dropdown-item" href="{% url 'job_delete' record.id %}"><i class="bx bx-trash me-1"></i>
-                  Delete</a>
+                <a class="dropdown-item" href="{% url 'job_detail' record.id %}"><i class="bx bx-detail me-1"></i> Details</a>
+                <a class="dropdown-item" href="{% url 'job_edit' record.id %}"><i class="bx bx-pencil me-1"></i> Edit</a>
+                <a class="dropdown-item" href="{% url 'job_delete' record.id %}"><i class="bx bx-trash me-1"></i> Delete</a>
               </div>
             </div>
           </td>
